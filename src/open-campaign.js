@@ -126,12 +126,55 @@ async function hasLargeUploadFile(files, limitBytes = 50 * 1024 * 1024) {
   return false;
 }
 
+function waitForCDPEvent(client, eventName, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      client.off(eventName, handler);
+      resolve(null);
+    }, timeoutMs);
+
+    function handler(params) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      client.off(eventName, handler);
+      resolve(params);
+    }
+
+    client.on(eventName, handler);
+  });
+}
+
 async function setFilesViaCDP(page, files) {
   const client = await page.context().newCDPSession(page);
-  const { result } = await client.send('Runtime.evaluate', {
-    expression: `document.querySelector('input[type="file"]')`,
-    returnByValue: false,
-  });
+  const startedAt = Date.now();
+  let result = null;
+
+  while (Date.now() - startedAt < 30000 && !result?.objectId) {
+    const response = await client.send('Runtime.evaluate', {
+      expression: `(() => {
+        const findInput = (root) => {
+          const inputs = Array.from(root.querySelectorAll('input[type="file"]'));
+          const enabled = inputs.find((input) => !input.disabled) || inputs[0];
+          if (enabled) return enabled;
+          for (const el of root.querySelectorAll('*')) {
+            if (el.shadowRoot) {
+              const nested = findInput(el.shadowRoot);
+              if (nested) return nested;
+            }
+          }
+          return null;
+        };
+        return findInput(document);
+      })()`,
+      returnByValue: false,
+    });
+    result = response.result;
+    if (!result?.objectId) await page.waitForTimeout(500);
+  }
 
   if (!result?.objectId) {
     throw new Error('file input object not found for CDP upload fallback');
@@ -141,6 +184,29 @@ async function setFilesViaCDP(page, files) {
     objectId: result.objectId,
     files,
   });
+}
+
+async function uploadFilesViaInterceptedChooser(page, files, triggerUploadClick) {
+  const client = await page.context().newCDPSession(page);
+  await client.send('Page.enable').catch(() => null);
+  await client.send('DOM.enable').catch(() => null);
+  await client.send('Page.setInterceptFileChooserDialog', { enabled: true }).catch(() => null);
+
+  const chooserEventPromise = waitForCDPEvent(client, 'Page.fileChooserOpened', 30000);
+  await triggerUploadClick();
+
+  const chooserEvent = await chooserEventPromise;
+  await client.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => null);
+
+  if (chooserEvent?.backendNodeId) {
+    await client.send('DOM.setFileInputFiles', {
+      backendNodeId: chooserEvent.backendNodeId,
+      files,
+    });
+    return;
+  }
+
+  await setFilesViaCDP(page, files);
 }
 
 async function uploadFilesToCurrentPicker(page, fileChooser, files, adFormat) {
@@ -153,7 +219,6 @@ async function uploadFilesToCurrentPicker(page, fileChooser, files, adFormat) {
       largeUpload,
       files,
     });
-    await page.locator('input[type="file"]').first().waitFor({ timeout: 30000 }).catch(() => null);
     await setFilesViaCDP(page, files);
     return;
   }
@@ -1412,13 +1477,25 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
 
   console.log('[DEBUG] 업로드 버튼 box:', uploadBox);
 
-  const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 10000 }).catch(() => null);
-  await uploadButton.click({ force: true }).catch(async () => {
+  const clickUploadButton = async () => uploadButton.click({ force: true }).catch(async () => {
     if (uploadBox) await page.mouse.click(uploadBox.x + uploadBox.width / 2, uploadBox.y + uploadBox.height / 2);
   });
 
-  const fileChooser = await fileChooserPromise;
-  await uploadFilesToCurrentPicker(page, fileChooser, files, adFormat);
+  const largeUpload = await hasLargeUploadFile(files);
+  const useCdpUpload = adFormat === 'video' || largeUpload;
+  if (useCdpUpload) {
+    console.log('[STEP] large/video upload detected - intercepting Chrome file chooser via CDP:', {
+      adFormat,
+      largeUpload,
+      files,
+    });
+    await uploadFilesViaInterceptedChooser(page, files, clickUploadButton);
+  } else {
+    const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 10000 }).catch(() => null);
+    await clickUploadButton();
+    const fileChooser = await fileChooserPromise;
+    await uploadFilesToCurrentPicker(page, fileChooser, files, adFormat);
+  }
 
   await page.waitForTimeout(adFormat === 'video' ? 10000 : 3000);
   console.log('[STEP] 바탕화면 날짜 폴더 이미지 전체 업로드 완료:', {
