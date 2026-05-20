@@ -139,6 +139,10 @@ function normalizeFolderName(value) {
   return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+function normalizeAssetStem(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 function resolveAssetPath(assetPath, baseDir = process.cwd()) {
   return path.isAbsolute(assetPath) ? assetPath : path.resolve(baseDir, assetPath);
 }
@@ -270,6 +274,14 @@ async function findVideoOnlyCampaignFolder(rootPath, campaignName) {
 
   const exact = directories.find((entry) => normalizeFolderName(entry.name) === normalizedCampaignName);
   return exact?.fullPath || '';
+}
+
+function findVideoAssetByAdName(assets, adName) {
+  const normalizedAdName = normalizeAssetStem(adName);
+  return assets.find((assetPath) => {
+    const stem = path.basename(assetPath).replace(/\.[^.]+$/, '');
+    return normalizeAssetStem(stem) === normalizedAdName;
+  }) || '';
 }
 
 async function resolveBlogAssetDir(adsetIndex, env, options, kind) {
@@ -529,16 +541,32 @@ export async function getVideoOnlyAssets(env = process.env, options = {}) {
 
   const detectedRoot = await findVideoOnlyAssetRoot(resolvedRoot, options);
   if (detectedRoot) {
-    const campaignFolder = await findVideoOnlyCampaignFolder(detectedRoot, options.campaignName || env.CAMPAIGN_NAME);
-    if (campaignFolder) {
-      return listFilesFromDirTree(campaignFolder, VIDEO_EXTENSIONS, 1);
-    }
-
     const detectedVideos = await listFilesFromDirTree(detectedRoot, VIDEO_EXTENSIONS, 2);
     if (detectedVideos.length) return detectedVideos;
   }
 
   return listFilesFromDirTree(resolvedRoot, VIDEO_EXTENSIONS, 2);
+}
+
+async function getVideoOnlyAssetsForFolderName(env = process.env, options = {}, folderName = '') {
+  const baseDir = options.baseDir || process.cwd();
+  const assetRoot = String(env.VIDEO_ONLY_ASSET_ROOT || env.MEDIA_FOLDER_PATH || '').trim();
+  const resolvedRoot = assetRoot ? resolveAssetPath(assetRoot, baseDir) : '';
+  if (!assetRoot || !(await pathExists(resolvedRoot))) return [];
+
+  const roots = [];
+  const detectedRoot = await findVideoOnlyAssetRoot(resolvedRoot, options);
+  if (detectedRoot) roots.push(detectedRoot);
+  roots.push(resolvedRoot);
+
+  for (const root of [...new Set(roots)]) {
+    const matchedFolder = await findVideoOnlyCampaignFolder(root, folderName);
+    if (matchedFolder) {
+      return listFilesFromDirTree(matchedFolder, VIDEO_EXTENSIONS, 1);
+    }
+  }
+
+  return [];
 }
 
 export function getVideoOnlyAssetBySequence(assets, sequence) {
@@ -568,13 +596,22 @@ export async function buildVideoOnlyPlan(env = process.env, options = {}) {
   }
 
   const adsets = [];
+  const plannedAssets = [];
   for (let adsetIndex = 1; adsetIndex <= effectiveAdsetCount; adsetIndex += 1) {
+    const adsetName = buildVideoOnlyAdsetName(adsetIndex, env, date);
+    const adsetFolderAssets = await getVideoOnlyAssetsForFolderName(env, options, adsetName);
     const ads = [];
     const adIndexBase = (adsetIndex - 1) * effectiveCreativeCount;
     for (let videoIndex = 1; videoIndex <= effectiveCreativeCount; videoIndex += 1) {
       const globalAdIndex = adIndexBase + videoIndex;
       const adName = buildVideoOnlyAdName(globalAdIndex, env, date);
-      const assetPath = videoAssets[globalAdIndex - 1];
+      const assetPath = findVideoAssetByAdName(adsetFolderAssets, adName)
+        || findVideoAssetByAdName(videoAssets, adName)
+        || videoAssets[globalAdIndex - 1];
+      if (!assetPath) {
+        throw new Error(`VIDEO_ONLY asset not found for ad ${adName}. Expected a video file named ${adName}.mp4/.mov/.m4v/.webm.`);
+      }
+      plannedAssets.push(assetPath);
       const landingUrl = getVideoOnlyLandingUrl(adName);
       ads.push({
         type: 'video',
@@ -593,7 +630,7 @@ export async function buildVideoOnlyPlan(env = process.env, options = {}) {
 
     adsets.push({
       index: adsetIndex,
-      name: buildVideoOnlyAdsetName(adsetIndex, env, date),
+      name: adsetName,
       landingUrl: ads[0]?.landingUrl || '',
       ads,
     });
@@ -606,7 +643,7 @@ export async function buildVideoOnlyPlan(env = process.env, options = {}) {
     videoAdsPerAdset: effectiveCreativeCount,
     totalAdsPerAdset: effectiveCreativeCount,
     totalAds: requiredAssetCount,
-    videoAssets: videoAssets.slice(0, requiredAssetCount),
+    videoAssets: plannedAssets,
     adsets,
   };
 }
