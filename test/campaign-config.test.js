@@ -352,6 +352,38 @@ test('VIDEO_ONLY plan reads videos from CBO child folder inside TikTok folder', 
   assert.match(plan.adsets[0].ads[0].assetPath, /0520 올레놀샷 CBO 캠페인-1/);
 });
 
+test('VIDEO_ONLY prefers CBO child folder matching CAMPAIGN_NAME', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'video-only-campaign-folder-'));
+  const assetRoot = path.join(root, 'desktop', '260520 올레놀샷 틱톡세팅');
+  const campaign1 = path.join(assetRoot, '0520 올레놀샷 CBO 캠페인-1');
+  const campaign2 = path.join(assetRoot, '0520 올레놀샷 CBO 캠페인-2');
+  await fs.mkdir(campaign1, { recursive: true });
+  await fs.mkdir(campaign2, { recursive: true });
+  for (let index = 1; index <= 4; index += 1) {
+    await fs.writeFile(path.join(campaign1, `F_V_O_L_0520_campaign1_${index}.mp4`), '');
+    await fs.writeFile(path.join(campaign2, `F_V_O_L_0520_${index}.mp4`), '');
+  }
+
+  const env = {
+    CAMPAIGN_MODE: 'VIDEO_ONLY',
+    CAMPAIGN_NAME: '0520 올레놀샷  CBO 캠페인-2',
+    ADSET_COUNT: '1',
+    AD_CREATIVE_COUNT: '1',
+    VIDEO_ONLY_ASSET_ROOT: './desktop',
+  };
+
+  const assets = await getVideoOnlyAssets(env, { baseDir: root, date: fixedDate });
+  assert.deepEqual(assets.map((asset) => path.basename(asset)), [
+    'F_V_O_L_0520_1.mp4',
+    'F_V_O_L_0520_2.mp4',
+    'F_V_O_L_0520_3.mp4',
+    'F_V_O_L_0520_4.mp4',
+  ]);
+
+  const plan = await buildVideoOnlyPlan(env, { baseDir: root, date: fixedDate });
+  assert.match(plan.adsets[0].ads[0].assetPath, /CBO 캠페인-2/);
+});
+
 test('VIDEO_ONLY fails when there are not enough video assets', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'video-only-plan-'));
   const assetRoot = path.join(root, 'desktop', '260520 올레놀샷 틱톡세팅');

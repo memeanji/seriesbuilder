@@ -135,6 +135,10 @@ function naturalCompare(a, b) {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 }
 
+function normalizeFolderName(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 function resolveAssetPath(assetPath, baseDir = process.cwd()) {
   return path.isAbsolute(assetPath) ? assetPath : path.resolve(baseDir, assetPath);
 }
@@ -249,6 +253,23 @@ async function findVideoOnlyAssetRoot(rootPath, options = {}) {
 
   const fallback = directories.find((entry) => entry.name.includes('올레놀샷') && entry.name.includes('틱톡세팅'));
   return fallback?.fullPath || '';
+}
+
+async function findVideoOnlyCampaignFolder(rootPath, campaignName) {
+  const normalizedCampaignName = normalizeFolderName(campaignName);
+  if (!rootPath || !normalizedCampaignName || !(await pathExists(rootPath))) return '';
+
+  const entries = await fs.readdir(rootPath, { withFileTypes: true }).catch(() => []);
+  const directories = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      name: entry.name,
+      fullPath: path.join(rootPath, entry.name),
+    }))
+    .sort((a, b) => naturalCompare(a.name, b.name));
+
+  const exact = directories.find((entry) => normalizeFolderName(entry.name) === normalizedCampaignName);
+  return exact?.fullPath || '';
 }
 
 async function resolveBlogAssetDir(adsetIndex, env, options, kind) {
@@ -508,6 +529,11 @@ export async function getVideoOnlyAssets(env = process.env, options = {}) {
 
   const detectedRoot = await findVideoOnlyAssetRoot(resolvedRoot, options);
   if (detectedRoot) {
+    const campaignFolder = await findVideoOnlyCampaignFolder(detectedRoot, options.campaignName || env.CAMPAIGN_NAME);
+    if (campaignFolder) {
+      return listFilesFromDirTree(campaignFolder, VIDEO_EXTENSIONS, 1);
+    }
+
     const detectedVideos = await listFilesFromDirTree(detectedRoot, VIDEO_EXTENSIONS, 2);
     if (detectedVideos.length) return detectedVideos;
   }
