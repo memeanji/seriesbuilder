@@ -98,11 +98,12 @@ IMAGE_ONLY_ASSET_ROOT=C:\Users\894플러스\Desktop\F_I_O_L_0520
 ```
 
 `PER_AD` 모드에서는 폴더 안 이미지를 파일명 순서대로 정렬해서 광고 순번에 1:1로 매칭합니다.
+폴더 안에 `메타 리타겟 소재-1번 세트-일예산 10만원_익일 05시 세팅` 같은 하위 폴더가 있으면, 하위 폴더를 세트 번호순으로 읽고 각 폴더 안 이미지를 순서대로 사용합니다.
 
 ```text
-image ad sequence 1 -> 첫 번째 이미지 파일
-image ad sequence 2 -> 두 번째 이미지 파일
-image ad sequence 3 -> 세 번째 이미지 파일
+메타 리타겟 소재-1번 세트-일예산 10만원_익일 05시 세팅/image1.jpg -> image ad sequence 1
+메타 리타겟 소재-1번 세트-일예산 10만원_익일 05시 세팅/image2.jpg -> image ad sequence 2
+메타 리타겟 소재-2번 세트-일예산 10만원_익일 05시 세팅/image1.jpg -> next ad sequence
 ```
 
 명시 목록을 쓰고 싶으면 아래처럼 지정할 수도 있습니다.

@@ -120,6 +120,35 @@ async function listFilesFromDir(dir, extensionPattern) {
     .sort(naturalCompare);
 }
 
+function extractImageOnlyAdsetFolderIndex(folderName) {
+  const normalized = String(folderName || '').trim();
+  const patterns = [
+    /메타\s*리타겟\s*소재\s*-\s*(\d+)\s*번\s*세트/i,
+    /(\d+)\s*번\s*세트/i,
+    /(\d+)\s*번\s*광고세트/i,
+    /adset[_\-\s]*(\d+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match) return Number(match[1]);
+  }
+
+  return Number.POSITIVE_INFINITY;
+}
+
+async function listImageOnlyAdsetFolders(rootPath) {
+  const entries = await fs.readdir(rootPath, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      name: entry.name,
+      fullPath: path.join(rootPath, entry.name),
+      index: extractImageOnlyAdsetFolderIndex(entry.name),
+    }))
+    .sort((a, b) => (a.index - b.index) || naturalCompare(a.name, b.name));
+}
+
 async function pathExists(filePath) {
   return fs.stat(filePath).then(() => true).catch(() => false);
 }
@@ -370,7 +399,17 @@ export async function getImageOnlyAssets(env = process.env, options = {}) {
     throw new Error(`IMAGE_ONLY asset root does not exist: ${resolvedRoot}`);
   }
 
-  return listFilesFromDir(resolvedRoot, IMAGE_EXTENSIONS);
+  const directImages = await listFilesFromDir(resolvedRoot, IMAGE_EXTENSIONS);
+  if (directImages.length) return directImages;
+
+  const adsetFolders = await listImageOnlyAdsetFolders(resolvedRoot);
+  const nestedImages = [];
+  for (const folder of adsetFolders) {
+    const images = await listFilesFromDir(folder.fullPath, IMAGE_EXTENSIONS);
+    nestedImages.push(...images);
+  }
+
+  return nestedImages;
 }
 
 export function getImageOnlyAssetBySequence(assets, sequence) {

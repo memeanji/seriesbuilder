@@ -168,6 +168,33 @@ test('IMAGE_ONLY PER_AD mode maps sorted image assets by ad sequence', async () 
   assert.equal(result.plan.totalAds, 4);
 });
 
+test('IMAGE_ONLY PER_AD mode reads images from adset child folders', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'image-only-folders-'));
+  const assetRoot = path.join(root, 'F_I_O_L_0520');
+  const adset2 = path.join(assetRoot, '메타 리타겟 소재-2번 세트-일예산 10만원_익일 05시 세팅');
+  const adset1 = path.join(assetRoot, '메타 리타겟 소재-1번 세트-일예산 10만원_익일 05시 세팅');
+  await fs.mkdir(adset2, { recursive: true });
+  await fs.mkdir(adset1, { recursive: true });
+  await fs.writeFile(path.join(adset2, 'image2.jpg'), '');
+  await fs.writeFile(path.join(adset2, 'image1.jpg'), '');
+  await fs.writeFile(path.join(adset1, 'image2.jpg'), '');
+  await fs.writeFile(path.join(adset1, 'image1.jpg'), '');
+
+  const env = {
+    CAMPAIGN_MODE: 'IMAGE_ONLY',
+    IMAGE_ONLY_UPLOAD_MODE: 'PER_AD',
+    ADSET_COUNT: '1',
+    AD_CREATIVE_COUNT: '1',
+    IMAGE_ONLY_ASSET_ROOT: './F_I_O_L_0520',
+  };
+  const assets = await getImageOnlyAssets(env, { baseDir: root });
+
+  assert.match(assets[0], /1번 세트.*image1\.jpg$/);
+  assert.match(assets[1], /1번 세트.*image2\.jpg$/);
+  assert.match(assets[2], /2번 세트.*image1\.jpg$/);
+  assert.match(assets[3], /2번 세트.*image2\.jpg$/);
+});
+
 test('dry-run plan lists image and video creatives without API calls', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-plan-'));
   await createBlogAssets(root, 5);

@@ -1376,10 +1376,28 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
       : /\.(png|jpe?g|webp|gif)$/i;
 
     const entries = await fs.readdir(rootPath, { withFileTypes: true });
-    return entries
+    const directFiles = entries
       .filter((e) => e.isFile())
       .map((e) => path.join(rootPath, e.name))
-      .filter((f) => mediaPattern.test(f));
+      .filter((f) => mediaPattern.test(f))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    if (directFiles.length) return directFiles;
+
+    const childFolders = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => path.join(rootPath, e.name))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    const nestedFiles = [];
+    for (const childFolder of childFolders) {
+      const childEntries = await fs.readdir(childFolder, { withFileTypes: true }).catch(() => []);
+      nestedFiles.push(...childEntries
+        .filter((e) => e.isFile())
+        .map((e) => path.join(childFolder, e.name))
+        .filter((f) => mediaPattern.test(f))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })));
+    }
+
+    return nestedFiles;
   }
 
   async function findExactMediaFolder() {

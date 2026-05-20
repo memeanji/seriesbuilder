@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -147,7 +148,21 @@ def read_child_folder_names(root: str, limit: int) -> list[str]:
         return []
 
     folders = [item.name for item in root_path.iterdir() if item.is_dir()]
-    return sorted(folders)[:limit]
+    return sorted(folders, key=folder_sort_key)[:limit]
+
+
+def folder_sort_key(folder_name: str) -> tuple[int, str]:
+    patterns = [
+        r"메타\s*리타겟\s*소재\s*-\s*(\d+)\s*번\s*세트",
+        r"(\d+)\s*번\s*세트",
+        r"(\d+)\s*번\s*광고세트",
+        r"adset[_\-\s]*(\d+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, folder_name, flags=re.IGNORECASE)
+        if match:
+            return int(match.group(1)), folder_name
+    return 999999, folder_name
 
 
 def validate_form(values: dict[str, str]) -> list[str]:
