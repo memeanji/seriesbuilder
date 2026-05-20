@@ -69,7 +69,7 @@ ADSET_DAILY_BUDGET=100000
 CDP_URL=http://127.0.0.1:9222
 SCHEDULE_TIME=05:00
 MEDIA_FOLDER_PATH=
-IMAGE_ONLY_UPLOAD_MODE=
+IMAGE_ONLY_UPLOAD_MODE=PER_AD
 IMAGE_ONLY_ASSET_ROOT=
 ```
 
@@ -80,8 +80,8 @@ IMAGE_ONLY_ASSET_ROOT=
 - 광고세트명은 기존 `MMDD {ADSET_BASE_NAME} {index}번 광고세트` 규칙을 유지합니다.
 - 광고명은 `f_i_o_l_MMDD_1`, `f_i_o_l_MMDD_2`, ..., `f_i_o_l_MMDD_10`처럼 패딩 없는 인덱스 규칙을 사용합니다.
 - 랜딩 URL도 기존 광고명 기반 URL 생성 방식을 유지합니다.
-- 기존 이미지 업로드/검색 흐름을 그대로 사용합니다.
-- 더 빠른 1개 광고당 1개 이미지 업로드를 쓰려면 `IMAGE_ONLY_UPLOAD_MODE=PER_AD`를 켭니다.
+- 이미지는 BLOG_MIXED처럼 폴더에서 1개씩 업로드하고 바로 선택합니다.
+- 예전 전체 업로드/검색 흐름이 필요하면 `IMAGE_ONLY_UPLOAD_MODE=LEGACY`로 바꿉니다.
 
 예시:
 

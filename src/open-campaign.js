@@ -2636,7 +2636,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         } else if (isPerAdImageOnlyUploadMode(process.env)) {
           const imageAssetPath = getImageOnlyAssetBySequence(imageOnlyPerAdAssets, adCreativeIndex);
           if (!imageAssetPath) {
-            throw new Error(`IMAGE_ONLY_UPLOAD_MODE=PER_AD image asset not found for ad sequence ${adCreativeIndex}.`);
+            throw new Error(`IMAGE_ONLY per-ad image asset not found for ad sequence ${adCreativeIndex}.`);
           }
           await page.waitForTimeout(3000);
           await attachMediaFromFolderIfConfigured(page, targetAdName, [imageAssetPath], 'image');
@@ -2698,7 +2698,7 @@ async function runCreativeStepOnly(page) {
         imageOnlyPerAdAssets = await getImageOnlyAssets(process.env, { baseDir: process.cwd() });
       }
       const imageAssetPath = getImageOnlyAssetBySequence(imageOnlyPerAdAssets, 1);
-      if (!imageAssetPath) throw new Error('IMAGE_ONLY_UPLOAD_MODE=PER_AD image asset not found for quick creative test.');
+      if (!imageAssetPath) throw new Error('IMAGE_ONLY per-ad image asset not found for quick creative test.');
       await attachMediaFromFolderIfConfigured(page, QUICK_TEST_AD_NAME, [imageAssetPath], 'image');
     } else {
       await attachMediaFromFolderIfConfigured(page, QUICK_TEST_AD_NAME);

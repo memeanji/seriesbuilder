@@ -135,8 +135,8 @@ test('BLOG_ASSET_ROOT detects Korean adset folders with mixed media in one folde
   assert.match(plan.adsets[1].imageAssets[0], /0520 2번 광고세트/);
 });
 
-test('IMAGE_ONLY mode validation stays lightweight', async () => {
-  const result = await validateCampaignConfig({ CAMPAIGN_MODE: 'IMAGE_ONLY', ADSET_COUNT: '9' });
+test('IMAGE_ONLY LEGACY mode validation stays lightweight', async () => {
+  const result = await validateCampaignConfig({ CAMPAIGN_MODE: 'IMAGE_ONLY', IMAGE_ONLY_UPLOAD_MODE: 'LEGACY', ADSET_COUNT: '9' });
   assert.equal(result.mode, CAMPAIGN_MODES.IMAGE_ONLY);
   assert.equal(result.plan, null);
   assert.equal(normalizeCampaignMode(''), CAMPAIGN_MODES.IMAGE_ONLY);
@@ -163,6 +163,26 @@ test('IMAGE_ONLY PER_AD mode maps sorted image assets by ad sequence', async () 
   assert.equal(path.basename(getImageOnlyAssetBySequence(assets, 2)), 'image2.jpg');
 
   const result = await validateCampaignConfig(env, { baseDir: root });
+  assert.equal(result.mode, CAMPAIGN_MODES.IMAGE_ONLY);
+  assert.equal(result.plan.uploadMode, 'PER_AD');
+  assert.equal(result.plan.totalAds, 4);
+});
+
+test('IMAGE_ONLY defaults to per-ad upload mode', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'image-only-default-'));
+  const assetRoot = path.join(root, 'images');
+  await fs.mkdir(assetRoot, { recursive: true });
+  for (let index = 1; index <= 4; index += 1) {
+    await fs.writeFile(path.join(assetRoot, `image${index}.jpg`), '');
+  }
+
+  const result = await validateCampaignConfig({
+    CAMPAIGN_MODE: 'IMAGE_ONLY',
+    ADSET_COUNT: '1',
+    AD_CREATIVE_COUNT: '1',
+    MEDIA_FOLDER_PATH: './images',
+  }, { baseDir: root });
+
   assert.equal(result.mode, CAMPAIGN_MODES.IMAGE_ONLY);
   assert.equal(result.plan.uploadMode, 'PER_AD');
   assert.equal(result.plan.totalAds, 4);

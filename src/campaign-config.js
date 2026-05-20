@@ -100,7 +100,7 @@ function splitAssetList(value) {
 }
 
 export function isPerAdImageOnlyUploadMode(env = process.env) {
-  return String(env.IMAGE_ONLY_UPLOAD_MODE || '').trim().toUpperCase() === 'PER_AD';
+  return String(env.IMAGE_ONLY_UPLOAD_MODE || 'PER_AD').trim().toUpperCase() !== 'LEGACY';
 }
 
 function naturalCompare(a, b) {
@@ -448,7 +448,7 @@ export async function validateCampaignConfig(env = process.env, options = {}) {
     const effectiveCreativeCount = adCreativeDuplicateCount + 1;
     const requiredAssetCount = effectiveAdsetCount * effectiveCreativeCount;
     if (imageAssets.length < requiredAssetCount) {
-      throw new Error(`IMAGE_ONLY_UPLOAD_MODE=PER_AD requires at least ${requiredAssetCount} image assets. Found ${imageAssets.length}.`);
+      throw new Error(`IMAGE_ONLY per-ad upload requires at least ${requiredAssetCount} image assets. Found ${imageAssets.length}. Set IMAGE_ONLY_UPLOAD_MODE=LEGACY to use the old bulk upload/search flow.`);
     }
 
     for (const asset of imageAssets.slice(0, requiredAssetCount)) {

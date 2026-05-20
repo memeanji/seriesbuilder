@@ -178,9 +178,9 @@ def validate_form(values: dict[str, str]) -> list[str]:
         for index in range(1, adset_count + 1):
             if not values.get(f"BLOG_LANDING_URL_{index}", "").strip():
                 errors.append(f"BLOG_LANDING_URL_{index} is required.")
-    elif values.get("IMAGE_ONLY_UPLOAD_MODE") == "PER_AD":
+    elif values.get("CAMPAIGN_MODE") == "IMAGE_ONLY" and values.get("IMAGE_ONLY_UPLOAD_MODE") != "LEGACY":
         if not (values.get("IMAGE_ONLY_ASSET_ROOT", "").strip() or values.get("MEDIA_FOLDER_PATH", "").strip()):
-            errors.append("IMAGE_ONLY PER_AD requires IMAGE_ONLY_ASSET_ROOT or MEDIA_FOLDER_PATH.")
+            errors.append("IMAGE_ONLY per-ad upload requires IMAGE_ONLY_ASSET_ROOT or MEDIA_FOLDER_PATH.")
     return errors
 
 
@@ -279,7 +279,7 @@ else:
     creative_count = st.number_input("Image ad count", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "4") or "4"))
     per_ad_upload = st.checkbox(
         "Upload one image per ad",
-        value=env.get("IMAGE_ONLY_UPLOAD_MODE", "").upper() == "PER_AD",
+        value=env.get("IMAGE_ONLY_UPLOAD_MODE", "PER_AD").upper() != "LEGACY",
     )
     media_folder = st.text_input(
         "Image media folder",
@@ -295,7 +295,7 @@ else:
             folder_name = detected_folder_names[index - 1] if index <= len(detected_folder_names) else expected_image_folder_name(index, daily_budget, int(creative_count) + 1, schedule_time)
             st.write(f"{index}. `{folder_name}`")
     next_env["AD_CREATIVE_COUNT"] = str(creative_count)
-    next_env["IMAGE_ONLY_UPLOAD_MODE"] = "PER_AD" if per_ad_upload else ""
+    next_env["IMAGE_ONLY_UPLOAD_MODE"] = "PER_AD" if per_ad_upload else "LEGACY"
     next_env["IMAGE_ONLY_ASSET_ROOT"] = media_folder if per_ad_upload else ""
     next_env["MEDIA_FOLDER_PATH"] = media_folder
 
