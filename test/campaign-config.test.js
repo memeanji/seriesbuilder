@@ -9,10 +9,15 @@ import {
   buildBlogImageAdName,
   buildBlogMixedPlan,
   buildBlogVideoAdName,
+  buildVideoOnlyAdName,
+  buildVideoOnlyAdsetName,
+  buildVideoOnlyPlan,
   formatDryRunPlan,
   getImageOnlyAssetBySequence,
   getImageOnlyAssets,
   getLandingUrlForAdset,
+  getVideoOnlyAssets,
+  getVideoOnlyLandingUrl,
   normalizeCampaignMode,
   validateCampaignConfig,
 } from '../src/campaign-config.js';
@@ -247,4 +252,73 @@ test('BLOG_MIXED ad names continue across adsets', async () => {
     'f_i_b_o_l_0520_9',
     'f_v_b_o_l_0520_10',
   ]);
+});
+
+test('VIDEO_ONLY naming and landing URL use MMDD ad index', () => {
+  const env = {
+    CAMPAIGN_MODE: 'VIDEO_ONLY',
+    DATE_FORMAT: 'MMDD',
+    VIDEO_ONLY_AD_NAME_PREFIX: 'f_v_o_l',
+  };
+
+  assert.equal(normalizeCampaignMode('VIDEO_ONLY'), CAMPAIGN_MODES.VIDEO_ONLY);
+  assert.equal(buildVideoOnlyAdsetName(1, env, fixedDate), '0520 직접랜딩 1번 광고세트');
+  assert.equal(buildVideoOnlyAdName(3, env, fixedDate), 'f_v_o_l_0520_3');
+  assert.equal(
+    getVideoOnlyLandingUrl('f_v_o_l_0520_3'),
+    'https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_0520_3',
+  );
+});
+
+test('VIDEO_ONLY plan reads videos from YYMMDD TikTok folder', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'video-only-plan-'));
+  const assetRoot = path.join(root, 'desktop');
+  const tiktokDir = path.join(assetRoot, '260520 올레놀샷 틱톡세팅');
+  await fs.mkdir(tiktokDir, { recursive: true });
+  for (let index = 1; index <= 4; index += 1) {
+    await fs.writeFile(path.join(tiktokDir, `F_V_O_L_0520_${index}.mp4`), '');
+  }
+
+  const env = {
+    CAMPAIGN_MODE: 'VIDEO_ONLY',
+    CAMPAIGN_NAME: 'Video campaign',
+    ADSET_COUNT: '1',
+    AD_CREATIVE_COUNT: '1',
+    DATE_FORMAT: 'MMDD',
+    VIDEO_ONLY_ASSET_ROOT: './desktop',
+  };
+
+  const assets = await getVideoOnlyAssets(env, { baseDir: root, date: fixedDate });
+  assert.deepEqual(assets.map((asset) => path.basename(asset)), [
+    'F_V_O_L_0520_1.mp4',
+    'F_V_O_L_0520_2.mp4',
+    'F_V_O_L_0520_3.mp4',
+    'F_V_O_L_0520_4.mp4',
+  ]);
+
+  const plan = await buildVideoOnlyPlan(env, { baseDir: root, date: fixedDate });
+  assert.equal(plan.mode, CAMPAIGN_MODES.VIDEO_ONLY);
+  assert.equal(plan.adsets.length, 2);
+  assert.equal(plan.totalAds, 4);
+  assert.equal(plan.adsets[0].name, '0520 직접랜딩 1번 광고세트');
+  assert.deepEqual(plan.adsets[0].ads.map((ad) => ad.name), ['f_v_o_l_0520_1', 'f_v_o_l_0520_2']);
+  assert.deepEqual(plan.adsets[1].ads.map((ad) => ad.name), ['f_v_o_l_0520_3', 'f_v_o_l_0520_4']);
+  assert.equal(plan.adsets[1].ads[1].landingUrl, 'https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_0520_4');
+});
+
+test('VIDEO_ONLY fails when there are not enough video assets', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'video-only-plan-'));
+  const assetRoot = path.join(root, 'desktop', '260520 올레놀샷 틱톡세팅');
+  await fs.mkdir(assetRoot, { recursive: true });
+  await fs.writeFile(path.join(assetRoot, 'F_V_O_L_0520_1.mov'), '');
+
+  await assert.rejects(
+    () => buildVideoOnlyPlan({
+      CAMPAIGN_MODE: 'VIDEO_ONLY',
+      ADSET_COUNT: '1',
+      AD_CREATIVE_COUNT: '1',
+      VIDEO_ONLY_ASSET_ROOT: './desktop',
+    }, { baseDir: root, date: fixedDate }),
+    /VIDEO_ONLY requires at least 4 video assets. Found 1./,
+  );
 });

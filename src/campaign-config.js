@@ -4,6 +4,7 @@ import path from 'node:path';
 export const CAMPAIGN_MODES = {
   IMAGE_ONLY: 'IMAGE_ONLY',
   BLOG_MIXED: 'BLOG_MIXED',
+  VIDEO_ONLY: 'VIDEO_ONLY',
 };
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|gif)$/i;
@@ -17,6 +18,9 @@ export function normalizeCampaignMode(value) {
   const normalized = String(value || '').trim().toUpperCase();
   if (['BLOG', 'BLOG_CAMPAIGN', 'BLOG_MIXED', 'BLOG_MIXED_CAMPAIGN'].includes(normalized)) {
     return CAMPAIGN_MODES.BLOG_MIXED;
+  }
+  if (['VIDEO', 'VIDEO_ONLY', 'VIDEO_CAMPAIGN', 'VIDEO_ONLY_CAMPAIGN'].includes(normalized)) {
+    return CAMPAIGN_MODES.VIDEO_ONLY;
   }
   return CAMPAIGN_MODES.IMAGE_ONLY;
 }
@@ -81,6 +85,30 @@ export function buildBlogVideoAdName(adIndex, env = process.env, date = new Date
     dateFormat: env.DATE_FORMAT || 'MMDD',
   });
   return `${prefix}_${today}_${adIndex}`;
+}
+
+export function buildVideoOnlyAdName(adIndex, env = process.env, date = new Date()) {
+  const prefix = env.VIDEO_ONLY_AD_NAME_PREFIX || 'f_v_o_l';
+  const today = getTodayString({
+    date,
+    timezone: env.TIMEZONE || 'Asia/Seoul',
+    dateFormat: env.DATE_FORMAT || 'MMDD',
+  });
+  return `${prefix}_${today}_${adIndex}`;
+}
+
+export function buildVideoOnlyAdsetName(adsetIndex, env = process.env, date = new Date()) {
+  const today = getTodayString({
+    date,
+    timezone: env.TIMEZONE || 'Asia/Seoul',
+    dateFormat: env.DATE_FORMAT || 'MMDD',
+  });
+  const includeIndex = String(env.VIDEO_ONLY_ADSET_NAME_INCLUDE_INDEX || 'true').trim().toLowerCase() !== 'false';
+  return includeIndex ? `${today} 직접랜딩 ${adsetIndex}번 광고세트` : `${today} 직접랜딩 광고세트`;
+}
+
+export function getVideoOnlyLandingUrl(adName) {
+  return `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${adName}`;
 }
 
 export function getLandingUrlForAdset(adsetIndex, env = process.env) {
@@ -159,6 +187,11 @@ function getTodayMMDD(date = new Date()) {
   return `${month}${day}`;
 }
 
+function getTodayYYMMDD(date = new Date()) {
+  const year = String(date.getFullYear()).slice(-2);
+  return `${year}${getTodayMMDD(date)}`;
+}
+
 async function findBlogAdsetFolderFromRoot(rootPath, adsetIndex, options = {}) {
   if (!rootPath || !(await pathExists(rootPath))) return '';
 
@@ -177,6 +210,27 @@ async function findBlogAdsetFolderFromRoot(rootPath, adsetIndex, options = {}) {
   if (preferred) return preferred.fullPath;
 
   const fallback = directories.find((entry) => entry.name.includes(fallbackToken));
+  return fallback?.fullPath || '';
+}
+
+async function findVideoOnlyAssetRoot(rootPath, options = {}) {
+  if (!rootPath || !(await pathExists(rootPath))) return '';
+
+  const yymmdd = options.yymmdd || getTodayYYMMDD(options.date || new Date());
+  const preferredPrefix = `${yymmdd} 올레놀샷 틱톡세팅`;
+  const entries = await fs.readdir(rootPath, { withFileTypes: true }).catch(() => []);
+  const directories = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      name: entry.name,
+      fullPath: path.join(rootPath, entry.name),
+    }))
+    .sort((a, b) => naturalCompare(a.name, b.name));
+
+  const preferred = directories.find((entry) => entry.name.startsWith(preferredPrefix));
+  if (preferred) return preferred.fullPath;
+
+  const fallback = directories.find((entry) => entry.name.includes('올레놀샷') && entry.name.includes('틱톡세팅'));
   return fallback?.fullPath || '';
 }
 
@@ -416,6 +470,115 @@ export function getImageOnlyAssetBySequence(assets, sequence) {
   return assets[sequence - 1] || '';
 }
 
+export async function getVideoOnlyAssets(env = process.env, options = {}) {
+  const baseDir = options.baseDir || process.cwd();
+  const assetRoot = String(env.VIDEO_ONLY_ASSET_ROOT || env.MEDIA_FOLDER_PATH || '').trim();
+  const resolvedRoot = assetRoot ? resolveAssetPath(assetRoot, baseDir) : '';
+  const explicitAssets = splitAssetList(env.VIDEO_ONLY_ASSETS)
+    .map((assetPath) => {
+      if (path.isAbsolute(assetPath)) return assetPath;
+      return resolveAssetPath(assetPath, resolvedRoot || baseDir);
+    });
+  if (explicitAssets.length) return explicitAssets;
+
+  if (!assetRoot) return [];
+  if (!(await pathExists(resolvedRoot))) {
+    throw new Error(`VIDEO_ONLY asset root does not exist: ${resolvedRoot}`);
+  }
+
+  const directVideos = await listFilesFromDir(resolvedRoot, VIDEO_EXTENSIONS);
+  if (directVideos.length) return directVideos;
+
+  const detectedRoot = await findVideoOnlyAssetRoot(resolvedRoot, options);
+  if (!detectedRoot) return [];
+  return listFilesFromDir(detectedRoot, VIDEO_EXTENSIONS);
+}
+
+export function getVideoOnlyAssetBySequence(assets, sequence) {
+  return assets[sequence - 1] || '';
+}
+
+export async function buildVideoOnlyPlan(env = process.env, options = {}) {
+  const date = options.date || new Date();
+  const adsetDuplicateCount = readIntegerEnv(env, 'ADSET_COUNT', 1);
+  const adCreativeDuplicateCount = readIntegerEnv(env, 'AD_CREATIVE_COUNT', readIntegerEnv(env, 'VIDEO_AD_COUNT', readIntegerEnv(env, 'ADSET_CREATIVE_COUNT', 1)));
+  const effectiveAdsetCount = adsetDuplicateCount + 1;
+  const effectiveCreativeCount = adCreativeDuplicateCount + 1;
+  const requiredAssetCount = effectiveAdsetCount * effectiveCreativeCount;
+  const videoAssets = await getVideoOnlyAssets(env, options);
+
+  if (videoAssets.length < requiredAssetCount) {
+    throw new Error(`VIDEO_ONLY requires at least ${requiredAssetCount} video assets. Found ${videoAssets.length}.`);
+  }
+
+  for (const asset of videoAssets.slice(0, requiredAssetCount)) {
+    if (!VIDEO_EXTENSIONS.test(asset)) {
+      throw new Error(`Invalid VIDEO_ONLY asset: ${asset}. Allowed: mp4, mov, m4v, webm.`);
+    }
+    if (!(await pathExists(asset))) {
+      throw new Error(`VIDEO_ONLY asset does not exist: ${asset}`);
+    }
+  }
+
+  const adsets = [];
+  for (let adsetIndex = 1; adsetIndex <= effectiveAdsetCount; adsetIndex += 1) {
+    const ads = [];
+    const adIndexBase = (adsetIndex - 1) * effectiveCreativeCount;
+    for (let videoIndex = 1; videoIndex <= effectiveCreativeCount; videoIndex += 1) {
+      const globalAdIndex = adIndexBase + videoIndex;
+      const adName = buildVideoOnlyAdName(globalAdIndex, env, date);
+      const assetPath = videoAssets[globalAdIndex - 1];
+      const landingUrl = getVideoOnlyLandingUrl(adName);
+      ads.push({
+        type: 'video',
+        index: globalAdIndex,
+        adsetLocalIndex: videoIndex,
+        name: adName,
+        assetPath,
+        landingUrl,
+        creativePayload: buildVideoCreativePayload({
+          videoAsset: assetPath,
+          thumbnailAsset: env.VIDEO_ONLY_THUMBNAIL || '',
+          landingUrl,
+        }),
+      });
+    }
+
+    adsets.push({
+      index: adsetIndex,
+      name: buildVideoOnlyAdsetName(adsetIndex, env, date),
+      landingUrl: ads[0]?.landingUrl || '',
+      ads,
+    });
+  }
+
+  return {
+    mode: CAMPAIGN_MODES.VIDEO_ONLY,
+    campaignName: env.CAMPAIGN_NAME || '',
+    adsetCount: effectiveAdsetCount,
+    videoAdsPerAdset: effectiveCreativeCount,
+    totalAdsPerAdset: effectiveCreativeCount,
+    totalAds: requiredAssetCount,
+    videoAssets: videoAssets.slice(0, requiredAssetCount),
+    adsets,
+  };
+}
+
+export function getVideoOnlyAdPlanBySequence(plan, sequence) {
+  const zeroBased = sequence - 1;
+  const adsetOffset = Math.floor(zeroBased / plan.totalAdsPerAdset);
+  const adOffset = zeroBased % plan.totalAdsPerAdset;
+  const adset = plan.adsets[adsetOffset];
+  if (!adset) return null;
+  const ad = adset.ads[adOffset];
+  if (!ad) return null;
+  return {
+    adsetIndex: adset.index,
+    adsetName: adset.name,
+    ...ad,
+  };
+}
+
 export function formatDryRunPlan(plan) {
   const lines = [
     '[DRY RUN] Meta Ads Automation plan',
@@ -472,6 +635,11 @@ export async function validateCampaignConfig(env = process.env, options = {}) {
         imageAssets: imageAssets.slice(0, requiredAssetCount),
       },
     };
+  }
+
+  if (mode === CAMPAIGN_MODES.VIDEO_ONLY) {
+    const plan = await buildVideoOnlyPlan(env, options);
+    return { mode, plan };
   }
 
   const plan = await buildBlogMixedPlan(env, options);

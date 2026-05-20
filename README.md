@@ -2,10 +2,11 @@
 
 Playwright와 기존 Chrome CDP 세션을 사용해 Meta Ads Manager 화면을 자동 조작합니다.
 
-현재 프로그램은 두 가지 캠페인 모드를 지원합니다.
+현재 프로그램은 세 가지 캠페인 모드를 지원합니다.
 
 - `IMAGE_ONLY`: 기존 이미지 전용 흐름입니다. `CAMPAIGN_MODE`를 비워두거나 `IMAGE_ONLY`로 두면 기존 방식으로 동작합니다.
 - `BLOG_MIXED`: 블로그 캠페인용 흐름입니다. 광고세트 1개당 이미지 광고 4개와 동영상 광고 1개를 구성합니다.
+- `VIDEO_ONLY`: 동영상 직접랜딩 캠페인용 흐름입니다. 동영상 광고만 만들고 광고명 기준으로 직접랜딩 URL을 자동 생성합니다.
 
 ## 실행
 
@@ -45,7 +46,7 @@ Streamlit MVP에서 할 수 있는 일:
 - `git pull origin main`
 - `npm install`
 - `.env` 저장 및 VS Code로 열기
-- 캠페인 유형 선택: `BLOG_MIXED` 또는 `IMAGE_ONLY`
+- 캠페인 유형 선택: `BLOG_MIXED`, `IMAGE_ONLY`, `VIDEO_ONLY`
 - 캠페인 유형에 따른 입력 항목 활성화
 - `BLOG_MIXED` 랜딩 URL을 광고세트 수만큼 입력
 - 바탕화면 `F_I_B_O_L_MMDD` 소재 루트 폴더 설정
@@ -146,6 +147,51 @@ BLOG_LANDING_URL_5=https://example.com/landing-5
 
 BLOG_ASSET_ROOT=./assets/blog
 ```
+
+## VIDEO_ONLY 모드
+
+동영상 직접랜딩 캠페인 모드입니다. Streamlit에서 `VIDEO_ONLY`를 선택하면 동영상 소재 폴더와 동영상 광고 개수를 입력할 수 있습니다.
+
+- 광고세트명 기본 규칙: `MMDD 직접랜딩 {adset_index}번 광고세트`
+- 광고명 규칙: `f_v_o_l_MMDD_{global_ad_index}`
+- 랜딩 URL은 광고명으로 자동 생성합니다.
+- `ADSET_COUNT`와 `AD_CREATIVE_COUNT`는 기존 복제 흐름과 맞춰 `+1`개로 실행됩니다.
+- 예: `ADSET_COUNT=1`, `AD_CREATIVE_COUNT=1`이면 광고세트 2개, 동영상 광고 4개가 필요합니다.
+
+랜딩 URL 예시:
+
+```text
+f_v_o_l_0520_1 -> https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_0520_1
+f_v_o_l_0520_2 -> https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_0520_2
+f_v_o_l_0520_3 -> https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_0520_3
+```
+
+소재 폴더는 아래처럼 잡으면 됩니다.
+
+```text
+Desktop/
+  260520 올레놀샷 틱톡세팅/
+    F_V_O_L_0520_1.mp4
+    F_V_O_L_0520_2.mp4
+    F_V_O_L_0520_3.mov
+```
+
+`.env` 예시:
+
+```env
+CAMPAIGN_MODE=VIDEO_ONLY
+DRY_RUN=true
+
+ADSET_COUNT=1
+AD_CREATIVE_COUNT=1
+AD_FORMAT=video
+
+VIDEO_ONLY_AD_NAME_PREFIX=f_v_o_l
+DATE_FORMAT=MMDD
+VIDEO_ONLY_ASSET_ROOT=C:\Users\894플러스\Desktop\260520 올레놀샷 틱톡세팅
+```
+
+`VIDEO_ONLY_ASSET_ROOT`에 위 폴더 자체를 넣어도 되고, 바탕화면처럼 부모 폴더를 넣으면 `YYMMDD 올레놀샷 틱톡세팅` 이름의 하위 폴더를 찾아서 사용합니다.
 
 ## BLOG_MIXED 이름 규칙
 

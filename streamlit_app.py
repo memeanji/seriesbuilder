@@ -65,6 +65,17 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
         for index in range(1, adset_count + 1):
             lines.append(f"BLOG_LANDING_URL_{index}={values.get(f'BLOG_LANDING_URL_{index}', '')}")
         lines.append("")
+    elif mode == "VIDEO_ONLY":
+        lines.extend(
+            [
+                f"AD_CREATIVE_COUNT={values.get('AD_CREATIVE_COUNT', '1')}",
+                "AD_FORMAT=video",
+                "VIDEO_ONLY_AD_NAME_PREFIX=f_v_o_l",
+                "DATE_FORMAT=MMDD",
+                f"VIDEO_ONLY_ASSET_ROOT={values.get('VIDEO_ONLY_ASSET_ROOT', '')}",
+                "",
+            ]
+        )
     else:
         lines.extend(
             [
@@ -129,6 +140,11 @@ def default_image_root() -> str:
     return str(Path.home() / "Desktop" / f"F_I_O_L_{mmdd}")
 
 
+def default_video_root() -> str:
+    yymmdd = datetime.now().strftime("%y%m%d")
+    return str(Path.home() / "Desktop" / f"{yymmdd} 올레놀샷 틱톡세팅")
+
+
 def expected_blog_folder_name(adset_index: int, budget: str, schedule_time: str) -> str:
     mmdd = datetime.now().strftime("%m%d")
     budget_manwon = int(int(budget or "0") / 10000)
@@ -140,6 +156,11 @@ def expected_image_folder_name(adset_index: int, budget: str, creative_count: in
     budget_manwon = int(int(budget or "0") / 10000)
     hour = schedule_time.split(":", 1)[0].zfill(2)
     return f"메타 리타겟 소재-{adset_index}번 세트-일예산 {budget_manwon}만원_익일 {hour}시 세팅"
+
+
+def expected_video_folder_name() -> str:
+    yymmdd = datetime.now().strftime("%y%m%d")
+    return f"{yymmdd} 올레놀샷 틱톡세팅"
 
 
 def read_child_folder_names(root: str, limit: int) -> list[str]:
@@ -181,6 +202,9 @@ def validate_form(values: dict[str, str]) -> list[str]:
     elif values.get("CAMPAIGN_MODE") == "IMAGE_ONLY" and values.get("IMAGE_ONLY_UPLOAD_MODE") != "LEGACY":
         if not (values.get("IMAGE_ONLY_ASSET_ROOT", "").strip() or values.get("MEDIA_FOLDER_PATH", "").strip()):
             errors.append("IMAGE_ONLY per-ad upload requires IMAGE_ONLY_ASSET_ROOT or MEDIA_FOLDER_PATH.")
+    elif values.get("CAMPAIGN_MODE") == "VIDEO_ONLY":
+        if not values.get("VIDEO_ONLY_ASSET_ROOT", "").strip():
+            errors.append("VIDEO_ONLY_ASSET_ROOT is required for VIDEO_ONLY.")
     return errors
 
 
@@ -235,8 +259,8 @@ left, right = st.columns(2)
 with left:
     campaign_mode = st.selectbox(
         "Campaign mode",
-        ["BLOG_MIXED", "IMAGE_ONLY"],
-        index=0 if env.get("CAMPAIGN_MODE", "IMAGE_ONLY") == "BLOG_MIXED" else 1,
+        ["BLOG_MIXED", "IMAGE_ONLY", "VIDEO_ONLY"],
+        index=["BLOG_MIXED", "IMAGE_ONLY", "VIDEO_ONLY"].index(env.get("CAMPAIGN_MODE", "IMAGE_ONLY")) if env.get("CAMPAIGN_MODE", "IMAGE_ONLY") in ["BLOG_MIXED", "IMAGE_ONLY", "VIDEO_ONLY"] else 1,
     )
     dry_run = st.toggle("DRY_RUN", value=env.get("DRY_RUN", "true").lower() == "true")
     ad_account_id = st.text_input("Ad account ID", value=env.get("AD_ACCOUNT_ID", DEFAULT_ACCOUNT_ID))
@@ -274,6 +298,28 @@ if campaign_mode == "BLOG_MIXED":
     for index in range(1, int(adset_count) + 1):
         key = f"BLOG_LANDING_URL_{index}"
         next_env[key] = st.text_input(f"Adset {index} landing URL", value=env.get(key, ""))
+elif campaign_mode == "VIDEO_ONLY":
+    st.subheader("VIDEO_ONLY")
+    st.caption("Video-only direct landing mode.")
+    video_count = st.number_input("Video ad count", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "1") or "1"))
+    video_root = st.text_input("Video asset root", value=env.get("VIDEO_ONLY_ASSET_ROOT", default_video_root()))
+    next_env["AD_CREATIVE_COUNT"] = str(video_count)
+    next_env["VIDEO_ONLY_ASSET_ROOT"] = video_root
+
+    with st.expander("Expected folder names", expanded=True):
+        detected_folder_names = read_child_folder_names(str(Path(video_root).parent), 1)
+        matched = [name for name in detected_folder_names if "올레놀샷" in name and "틱톡세팅" in name]
+        if matched:
+            st.caption("Detected from parent folder.")
+            st.write(f"1. `{matched[0]}`")
+        else:
+            st.caption("No matching folder detected yet. Showing recommended folder name.")
+            st.write(f"1. `{expected_video_folder_name()}`")
+
+    with st.expander("Landing URL pattern", expanded=True):
+        mmdd = datetime.now().strftime("%m%d")
+        st.write(f"`https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_{mmdd}_1`")
+        st.write(f"`https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_{mmdd}_2`")
 else:
     st.subheader("IMAGE_ONLY")
     creative_count = st.number_input("Image ad count", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "4") or "4"))

@@ -5,10 +5,14 @@ import { chromium } from 'playwright';
 import {
   CAMPAIGN_MODES,
   buildBlogAdsetName,
+  buildVideoOnlyAdsetName,
   formatDryRunPlan,
   getBlogAdPlanBySequence,
   getImageOnlyAssetBySequence,
   getImageOnlyAssets,
+  getVideoOnlyAdPlanBySequence,
+  getVideoOnlyAssetBySequence,
+  getVideoOnlyAssets,
   isPerAdImageOnlyUploadMode,
   normalizeCampaignMode,
   parseBoolean,
@@ -35,6 +39,7 @@ const QUICK_TEST_AD_NAME = process.env.QUICK_TEST_AD_NAME || getAdName(1);
 let firstCreativeMediaUploaded = false;
 let activeCampaignPlan = null;
 let imageOnlyPerAdAssets = [];
+let videoOnlyAssets = [];
 
 const DIRS = {
   screenshots: path.resolve('screenshots'),
@@ -64,6 +69,10 @@ function isBlogMixedCampaign() {
   return CAMPAIGN_MODE === CAMPAIGN_MODES.BLOG_MIXED;
 }
 
+function isVideoOnlyCampaign() {
+  return CAMPAIGN_MODE === CAMPAIGN_MODES.VIDEO_ONLY;
+}
+
 function normalizeText(value) {
   return value.replace(/\s+/g, '').toLowerCase();
 }
@@ -71,6 +80,7 @@ function normalizeText(value) {
 function normalizeAdFormat(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (['video', 'movie', '동영상', '영상'].includes(normalized)) return 'video';
+  if (normalizeCampaignMode(process.env.CAMPAIGN_MODE) === CAMPAIGN_MODES.VIDEO_ONLY) return 'video';
   return 'image';
 }
 
@@ -2531,7 +2541,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         .catch(() => '');
       const rowKey = rowId || `${Math.round(rowBox.x)}:${Math.round(rowBox.y)}:${rowText.slice(0, 80)}`;
       const targetAdsetName = adsetIndex <= adsetEndIndex
-        ? (isBlogMixedCampaign() ? buildBlogAdsetName(adsetIndex, process.env) : getAdsetName(adsetIndex))
+        ? (isBlogMixedCampaign() ? buildBlogAdsetName(adsetIndex, process.env) : (isVideoOnlyCampaign() ? buildVideoOnlyAdsetName(adsetIndex, process.env) : getAdsetName(adsetIndex)))
         : '';
       const isAlreadyTargetAdset = targetAdsetName && normalizeText(rowText).includes(normalizeText(targetAdsetName));
       const isAdsetCopy = rowText.includes('광고세트') && rowText.includes('사본');
@@ -2539,7 +2549,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const isBlogAdsetNameRow = isBlogMixedCampaign() && /f_i_b_o_l_\d{4}_\d+/i.test(rowText);
       const isBlogAdsetCopyRow = isBlogAdsetNameRow && /사본|copy/i.test(rowText);
       const isImageOnlyAdsetNameRow = !isBlogMixedCampaign() && /\d{4}\s+리타겟\s+\d+번\s+광고세트/i.test(rowText);
-      const shouldRenameAdsetRow = (isAdsetCopy || isBlogAdsetNameRow || isImageOnlyAdsetNameRow) && adsetIndex <= adsetEndIndex;
+      const isVideoOnlyAdsetNameRow = isVideoOnlyCampaign() && /\d{4}\s+직접랜딩\s+\d+번\s+광고세트/i.test(rowText);
+      const shouldRenameAdsetRow = (isAdsetCopy || isBlogAdsetNameRow || isImageOnlyAdsetNameRow || isVideoOnlyAdsetNameRow) && adsetIndex <= adsetEndIndex;
 
       if (processedAdsetRows.has(rowKey) && (rowText.includes('광고세트') || rowText.includes(ADSET_BASE_NAME) || isBlogAdsetNameRow)) {
         console.log('[DEBUG] 이미 처리한 광고세트 row 건너뜀:', { rowKey, rowText: rowText.slice(0, 120) });
@@ -2587,13 +2598,18 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         if (!visible) continue;
 
         const blogAdPlan = isBlogMixedCampaign() ? getBlogAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
+        const videoAdPlan = isVideoOnlyCampaign() ? getVideoOnlyAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
         if (isBlogMixedCampaign() && !blogAdPlan) {
           throw new Error(`BLOG_MIXED ad plan not found for creative sequence ${adCreativeIndex}`);
         }
-        const targetAdName = blogAdPlan?.name || getAdName(adCreativeIndex);
-        const targetLandingUrl = blogAdPlan?.landingUrl || '';
-        const targetAdFormat = blogAdPlan?.type || AD_FORMAT;
-        const targetAssetPath = blogAdPlan?.assetPath || '';
+        if (isVideoOnlyCampaign() && !videoAdPlan) {
+          throw new Error(`VIDEO_ONLY ad plan not found for creative sequence ${adCreativeIndex}`);
+        }
+        const targetPlan = blogAdPlan || videoAdPlan;
+        const targetAdName = targetPlan?.name || getAdName(adCreativeIndex);
+        const targetLandingUrl = targetPlan?.landingUrl || '';
+        const targetAdFormat = targetPlan?.type || AD_FORMAT;
+        const targetAssetPath = targetPlan?.assetPath || '';
 
         await adNameInput.click({ force: true });
         await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
@@ -2609,8 +2625,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
 
         console.log('[STEP] ad creative plan:', {
           campaignMode: CAMPAIGN_MODE,
-          adsetIndex: blogAdPlan?.adsetIndex,
-          adsetName: blogAdPlan?.adsetName,
+          adsetIndex: targetPlan?.adsetIndex,
+          adsetName: targetPlan?.adsetName,
           adType: targetAdFormat,
           targetAdName,
           targetLandingUrl,
@@ -2625,10 +2641,11 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         await page.waitForTimeout(5000);
         console.log('[STEP] creative format step completed:', { targetAdName, targetAdFormat });
 
-        if (isBlogMixedCampaign()) {
+        if (isBlogMixedCampaign() || isVideoOnlyCampaign()) {
           await page.waitForTimeout(5000);
           await attachMediaFromFolderIfConfigured(page, targetAdName, [targetAssetPath], targetAdFormat);
-          console.log('[STEP] BLOG_MIXED media upload completed:', {
+          console.log('[STEP] planned media upload completed:', {
+            campaignMode: CAMPAIGN_MODE,
             targetAdName,
             targetAdFormat,
             targetAssetPath,
@@ -2693,7 +2710,14 @@ async function runCreativeStepOnly(page) {
   console.log('[STEP] QUICK_TEST_CREATIVE_STEP=true - 크리에이티브 단계만 실행');
   await openCreativeSettingsAndFillLandingUrl(page, QUICK_TEST_AD_NAME);
   if (!firstCreativeMediaUploaded) {
-    if (isPerAdImageOnlyUploadMode(process.env)) {
+    if (isVideoOnlyCampaign()) {
+      if (!videoOnlyAssets.length) {
+        videoOnlyAssets = await getVideoOnlyAssets(process.env, { baseDir: process.cwd() });
+      }
+      const videoAssetPath = getVideoOnlyAssetBySequence(videoOnlyAssets, 1);
+      if (!videoAssetPath) throw new Error('VIDEO_ONLY video asset not found for quick creative test.');
+      await attachMediaFromFolderIfConfigured(page, QUICK_TEST_AD_NAME, [videoAssetPath], 'video');
+    } else if (isPerAdImageOnlyUploadMode(process.env)) {
       if (!imageOnlyPerAdAssets.length) {
         imageOnlyPerAdAssets = await getImageOnlyAssets(process.env, { baseDir: process.cwd() });
       }
@@ -2739,8 +2763,10 @@ async function runFlow(page) {
   await page.screenshot({ path: PATHS.step4, fullPage: true });
 
   for (let n = 0; n < 1; n += 1) {
-    const index = isBlogMixedCampaign() ? n + 1 : ADSET_START_INDEX + n;
-    const adsetName = isBlogMixedCampaign() ? buildBlogAdsetName(index, process.env) : getAdsetName(index);
+    const index = (isBlogMixedCampaign() || isVideoOnlyCampaign()) ? n + 1 : ADSET_START_INDEX + n;
+    const adsetName = isBlogMixedCampaign()
+      ? buildBlogAdsetName(index, process.env)
+      : (isVideoOnlyCampaign() ? buildVideoOnlyAdsetName(index, process.env) : getAdsetName(index));
     console.log(`[STEP] ${n + 1}/1 광고 세트 생성 시작: ${adsetName}`);
 
     await clickRealCreateButton(page);
@@ -2760,7 +2786,7 @@ async function runFlow(page) {
 
     const adCreativeDuplicateCount = isBlogMixedCampaign()
       ? Math.max((activeCampaignPlan?.totalAdsPerAdset || 5) - 1, 0)
-      : Math.max(AD_CREATIVE_COUNT, 0);
+      : (isVideoOnlyCampaign() ? Math.max((activeCampaignPlan?.totalAdsPerAdset || AD_CREATIVE_COUNT + 1) - 1, 0) : Math.max(AD_CREATIVE_COUNT, 0));
     if (adCreativeDuplicateCount > 0) {
       await pause(page, '스케줄링 후 새 판매 광고 복제 설정 전 대기', 5000);
       await setDuplicateCount(page, adCreativeDuplicateCount, '새 판매 광고');
@@ -2769,7 +2795,7 @@ async function runFlow(page) {
 
     const adsetDuplicateCount = isBlogMixedCampaign()
       ? Math.max((activeCampaignPlan?.adsetCount || ADSET_COUNT) - 1, 0)
-      : Math.max(ADSET_COUNT, 0);
+      : (isVideoOnlyCampaign() ? Math.max((activeCampaignPlan?.adsetCount || ADSET_COUNT + 1) - 1, 0) : Math.max(ADSET_COUNT, 0));
     if (adsetDuplicateCount > 0) {
       await pause(page, '스케줄링 후 광고세트 복제 설정 전 대기', 5000);
       await setDuplicateCount(page, adsetDuplicateCount, adsetName);
@@ -2777,7 +2803,7 @@ async function runFlow(page) {
     }
 
     if (n === 0) {
-      await renameAdsetsAndAdsSequentially(page, isBlogMixedCampaign() ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount);
+      await renameAdsetsAndAdsSequentially(page, (isBlogMixedCampaign() || isVideoOnlyCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount);
     }
 
   }
@@ -2793,6 +2819,9 @@ async function main() {
   if (validation.mode === CAMPAIGN_MODES.IMAGE_ONLY && activeCampaignPlan?.uploadMode === 'PER_AD') {
     imageOnlyPerAdAssets = activeCampaignPlan.imageAssets || [];
   }
+  if (validation.mode === CAMPAIGN_MODES.VIDEO_ONLY) {
+    videoOnlyAssets = activeCampaignPlan.videoAssets || [];
+  }
   console.log('[CONFIG] campaign mode:', validation.mode);
   if (imageOnlyPerAdAssets.length) {
     console.log('[CONFIG] image-only upload mode: PER_AD');
@@ -2800,7 +2829,7 @@ async function main() {
   }
 
   if (DRY_RUN) {
-    if (validation.mode === CAMPAIGN_MODES.BLOG_MIXED) {
+    if (validation.mode === CAMPAIGN_MODES.BLOG_MIXED || validation.mode === CAMPAIGN_MODES.VIDEO_ONLY) {
       console.log(formatDryRunPlan(activeCampaignPlan));
     } else if (activeCampaignPlan?.uploadMode === 'PER_AD') {
       console.log('[DRY RUN] Meta Ads Automation plan');
