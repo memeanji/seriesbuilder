@@ -150,3 +150,26 @@ test('dry-run plan lists image and video creatives without API calls', async () 
   assert.match(output, /image creative \| ad name: f_i_b_o_l_0520_1/);
   assert.match(output, /video creative \| ad name: f_v_b_o_l_0520_5/);
 });
+
+test('BLOG_MIXED ad names continue across adsets', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-plan-'));
+  await createBlogAssets(root, 2);
+  const plan = await buildBlogMixedPlan(blogEnv(root, { ADSET_COUNT: '2' }), { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.adsets[0].name, 'f_i_b_o_l_0520_1');
+  assert.deepEqual(plan.adsets[0].ads.map((ad) => ad.name), [
+    'f_i_b_o_l_0520_1',
+    'f_i_b_o_l_0520_2',
+    'f_i_b_o_l_0520_3',
+    'f_i_b_o_l_0520_4',
+    'f_v_b_o_l_0520_5',
+  ]);
+  assert.equal(plan.adsets[1].name, 'f_i_b_o_l_0520_2');
+  assert.deepEqual(plan.adsets[1].ads.map((ad) => ad.name), [
+    'f_i_b_o_l_0520_6',
+    'f_i_b_o_l_0520_7',
+    'f_i_b_o_l_0520_8',
+    'f_i_b_o_l_0520_9',
+    'f_v_b_o_l_0520_10',
+  ]);
+});

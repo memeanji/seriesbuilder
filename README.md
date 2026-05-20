@@ -139,14 +139,22 @@ f_i_b_o_l_{MMDD}_{adset_index}
 광고명:
 
 ```text
-이미지 광고 1: f_i_b_o_l_{MMDD}_1
-이미지 광고 2: f_i_b_o_l_{MMDD}_2
-이미지 광고 3: f_i_b_o_l_{MMDD}_3
-이미지 광고 4: f_i_b_o_l_{MMDD}_4
-동영상 광고 5: f_v_b_o_l_{MMDD}_5
+adset 1:
+image ad 1: f_i_b_o_l_{MMDD}_1
+image ad 2: f_i_b_o_l_{MMDD}_2
+image ad 3: f_i_b_o_l_{MMDD}_3
+image ad 4: f_i_b_o_l_{MMDD}_4
+video ad 5: f_v_b_o_l_{MMDD}_5
+
+adset 2:
+image ad 6: f_i_b_o_l_{MMDD}_6
+image ad 7: f_i_b_o_l_{MMDD}_7
+image ad 8: f_i_b_o_l_{MMDD}_8
+image ad 9: f_i_b_o_l_{MMDD}_9
+video ad 10: f_v_b_o_l_{MMDD}_10
 ```
 
-위 광고명 규칙은 광고세트마다 반복됩니다.
+광고명 번호는 광고세트마다 1부터 다시 시작하지 않고 전체 광고 기준으로 이어집니다.
 
 ## 랜딩 URL 매핑
 

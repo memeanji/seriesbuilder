@@ -277,11 +277,14 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
     }
 
     const ads = [];
+    const adIndexBase = (adsetIndex - 1) * totalAdsPerAdset;
     for (let imageIndex = 1; imageIndex <= imageAdsPerAdset; imageIndex += 1) {
+      const globalAdIndex = adIndexBase + imageIndex;
       ads.push({
         type: 'image',
-        index: imageIndex,
-        name: buildBlogImageAdName(imageIndex, env, date),
+        index: globalAdIndex,
+        adsetLocalIndex: imageIndex,
+        name: buildBlogImageAdName(globalAdIndex, env, date),
         assetPath: imageAssets[imageIndex - 1],
         landingUrl,
         creativePayload: buildImageCreativePayload({
@@ -291,10 +294,11 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
       });
     }
 
-    const videoAdIndex = totalAdsPerAdset;
+    const videoAdIndex = adIndexBase + totalAdsPerAdset;
     ads.push({
       type: 'video',
       index: videoAdIndex,
+      adsetLocalIndex: totalAdsPerAdset,
       name: buildBlogVideoAdName(videoAdIndex, env, date),
       assetPath: videoAsset,
       landingUrl,
