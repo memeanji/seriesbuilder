@@ -116,20 +116,53 @@ async function pathExists(filePath) {
   return fs.stat(filePath).then(() => true).catch(() => false);
 }
 
+function getTodayMMDD(date = new Date()) {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${month}${day}`;
+}
+
+async function findBlogAdsetFolderFromRoot(rootPath, adsetIndex, options = {}) {
+  if (!rootPath || !(await pathExists(rootPath))) return '';
+
+  const mmdd = options.mmdd || getTodayMMDD(options.date || new Date());
+  const preferredPrefix = `${mmdd} ${adsetIndex}번 광고세트`;
+  const fallbackToken = `${adsetIndex}번 광고세트`;
+  const entries = await fs.readdir(rootPath, { withFileTypes: true }).catch(() => []);
+  const directories = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      name: entry.name,
+      fullPath: path.join(rootPath, entry.name),
+    }));
+
+  const preferred = directories.find((entry) => entry.name.startsWith(preferredPrefix));
+  if (preferred) return preferred.fullPath;
+
+  const fallback = directories.find((entry) => entry.name.includes(fallbackToken));
+  return fallback?.fullPath || '';
+}
+
+async function resolveBlogAssetDir(adsetIndex, env, options, kind) {
+  const baseDir = options.baseDir || process.cwd();
+  const rootDir = env.BLOG_ASSET_ROOT ? resolveAssetPath(env.BLOG_ASSET_ROOT, baseDir) : '';
+  const configuredDir = env[`BLOG_ADSET_${adsetIndex}_${kind}_DIR`];
+  if (configuredDir) return resolveAssetPath(configuredDir, baseDir);
+  if (!rootDir) return '';
+
+  const conventionalDir = path.join(rootDir, `adset_${adsetIndex}`, kind.toLowerCase() === 'image' ? 'images' : 'videos');
+  if (await pathExists(conventionalDir)) return conventionalDir;
+
+  return findBlogAdsetFolderFromRoot(rootDir, adsetIndex, options);
+}
+
 export async function getImageAssetsForAdset(adsetIndex, env = process.env, options = {}) {
   const baseDir = options.baseDir || process.cwd();
   const explicitList = splitAssetList(env[`BLOG_ADSET_${adsetIndex}_IMAGE_ASSETS`])
     .map((assetPath) => resolveAssetPath(assetPath, baseDir));
   if (explicitList.length) return explicitList;
 
-  const configuredDir = env[`BLOG_ADSET_${adsetIndex}_IMAGE_DIR`];
-  const rootDir = env.BLOG_ASSET_ROOT;
-  const imageDir = configuredDir
-    ? resolveAssetPath(configuredDir, baseDir)
-    : rootDir
-      ? path.join(resolveAssetPath(rootDir, baseDir), `adset_${adsetIndex}`, 'images')
-      : '';
-
+  const imageDir = await resolveBlogAssetDir(adsetIndex, env, options, 'IMAGE');
   if (!imageDir) return [];
   if (!(await pathExists(imageDir))) return [];
   return listFilesFromDir(imageDir, IMAGE_EXTENSIONS);
@@ -140,14 +173,7 @@ export async function getVideoAssetsForAdset(adsetIndex, env = process.env, opti
   const explicitAsset = String(env[`BLOG_ADSET_${adsetIndex}_VIDEO_ASSET`] || '').trim();
   if (explicitAsset) return [resolveAssetPath(explicitAsset, baseDir)];
 
-  const configuredDir = env[`BLOG_ADSET_${adsetIndex}_VIDEO_DIR`];
-  const rootDir = env.BLOG_ASSET_ROOT;
-  const videoDir = configuredDir
-    ? resolveAssetPath(configuredDir, baseDir)
-    : rootDir
-      ? path.join(resolveAssetPath(rootDir, baseDir), `adset_${adsetIndex}`, 'videos')
-      : '';
-
+  const videoDir = await resolveBlogAssetDir(adsetIndex, env, options, 'VIDEO');
   if (!videoDir) return [];
   if (!(await pathExists(videoDir))) return [];
   return listFilesFromDir(videoDir, VIDEO_EXTENSIONS);

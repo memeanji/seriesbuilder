@@ -32,6 +32,19 @@ async function createBlogAssets(root, adsetCount = 5, imageCount = 4, includeVid
   }
 }
 
+async function createKoreanBlogAssets(root, adsetCount = 2, imageCount = 4, includeVideo = true) {
+  for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
+    const adsetDir = path.join(root, 'assets', 'blog', `0520 ${adsetIndex}번 광고세트-일예산 30만원-이미지 4개 + 영상 1개-익일 05시`);
+    await fs.mkdir(adsetDir, { recursive: true });
+    for (let imageIndex = 1; imageIndex <= imageCount; imageIndex += 1) {
+      await fs.writeFile(path.join(adsetDir, `image${imageIndex}.jpg`), '');
+    }
+    if (includeVideo) {
+      await fs.writeFile(path.join(adsetDir, 'video1.mp4'), '');
+    }
+  }
+}
+
 function blogEnv(root, overrides = {}) {
   return {
     CAMPAIGN_MODE: 'BLOG_MIXED',
@@ -104,6 +117,20 @@ test('video asset count above 1 fails', async () => {
     () => buildBlogMixedPlan(blogEnv(root), { baseDir: root, date: fixedDate }),
     /requires exactly 1 video asset for adset 1. Found 2/,
   );
+});
+
+test('BLOG_ASSET_ROOT detects Korean adset folders with mixed media in one folder', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-plan-'));
+  await createKoreanBlogAssets(root, 2);
+  const env = blogEnv(root, {
+    ADSET_COUNT: '2',
+    BLOG_ASSET_ROOT: './assets/blog',
+  });
+  const plan = await buildBlogMixedPlan(env, { baseDir: root, date: fixedDate, mmdd: '0520' });
+  assert.equal(plan.adsets.length, 2);
+  assert.equal(plan.adsets[0].imageAssets.length, 4);
+  assert.match(plan.adsets[0].videoAsset, /video1\.mp4$/);
+  assert.match(plan.adsets[1].imageAssets[0], /0520 2번 광고세트/);
 });
 
 test('IMAGE_ONLY mode validation stays lightweight', async () => {
