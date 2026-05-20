@@ -156,6 +156,7 @@ BLOG_ASSET_ROOT=./assets/blog
 - 광고명 규칙: `f_v_o_l_MMDD_{global_ad_index}`
 - 랜딩 URL은 광고명으로 자동 생성합니다.
 - `ADSET_COUNT`와 `AD_CREATIVE_COUNT`는 기존 복제 흐름과 맞춰 `+1`개로 실행됩니다.
+- `ADSET_COUNT=0`이면 복제 없이 광고세트 1개만 생성합니다.
 - 예: `ADSET_COUNT=1`, `AD_CREATIVE_COUNT=1`이면 광고세트 2개, 동영상 광고 4개가 필요합니다.
 
 랜딩 URL 예시:

@@ -24,7 +24,8 @@ const CAMPAIGN_NAME = process.env.CAMPAIGN_NAME;
 const ADSET_INDEX = process.env.ADSET_INDEX;
 const ADSET_BASE_NAME = '리타겟';
 const ADSET_START_INDEX = Number(process.env.ADSET_START_INDEX || ADSET_INDEX || 1);
-const ADSET_COUNT = Number(process.env.ADSET_COUNT || process.env.adset_count || 1);
+const ADSET_COUNT_RAW = process.env.ADSET_COUNT ?? process.env.adset_count;
+const ADSET_COUNT = Number(ADSET_COUNT_RAW === undefined || String(ADSET_COUNT_RAW).trim() === '' ? 1 : ADSET_COUNT_RAW);
 const AD_CREATIVE_COUNT = Number(process.env.ADSET_CREATIVE_COUNT || process.env.AD_CREATIVE_COUNT || process.env.ADVERTISE_COUNT || 5);
 const MEDIA_FOLDER_PATH = process.env.MEDIA_FOLDER_PATH;
 const SCHEDULE_TIME = process.env.SCHEDULE_TIME || '05:00';
@@ -60,7 +61,7 @@ function validateEnv() {
   if (!DRY_RUN && !AD_ACCOUNT_ID) throw new Error('AD_ACCOUNT_ID is missing in .env');
   if (!CAMPAIGN_NAME) throw new Error('CAMPAIGN_NAME is missing in .env');
   if (!Number.isFinite(ADSET_START_INDEX)) throw new Error('ADSET_START_INDEX must be a number');
-  if (!Number.isFinite(ADSET_COUNT) || ADSET_COUNT < 1) throw new Error('ADSET_COUNT must be >= 1');
+  if (!Number.isFinite(ADSET_COUNT) || ADSET_COUNT < 0) throw new Error('ADSET_COUNT must be >= 0');
   if (!Number.isFinite(AD_CREATIVE_COUNT) || AD_CREATIVE_COUNT < 1) throw new Error('AD_CREATIVE_COUNT must be >= 1');
   if (ADSET_DAILY_BUDGET && !/^\d+(\.\d+)?$/.test(ADSET_DAILY_BUDGET)) throw new Error('ADSET_DAILY_BUDGET must be a number');
 }

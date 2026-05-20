@@ -193,6 +193,24 @@ test('IMAGE_ONLY defaults to per-ad upload mode', async () => {
   assert.equal(result.plan.totalAds, 4);
 });
 
+test('IMAGE_ONLY allows ADSET_COUNT=0 as one actual adset', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'image-only-zero-adset-'));
+  const assetRoot = path.join(root, 'images');
+  await fs.mkdir(assetRoot, { recursive: true });
+  await fs.writeFile(path.join(assetRoot, 'image1.jpg'), '');
+  await fs.writeFile(path.join(assetRoot, 'image2.jpg'), '');
+
+  const result = await validateCampaignConfig({
+    CAMPAIGN_MODE: 'IMAGE_ONLY',
+    ADSET_COUNT: '0',
+    AD_CREATIVE_COUNT: '1',
+    IMAGE_ONLY_ASSET_ROOT: './images',
+  }, { baseDir: root });
+
+  assert.equal(result.plan.adsetCount, 1);
+  assert.equal(result.plan.totalAds, 2);
+});
+
 test('IMAGE_ONLY PER_AD mode reads images from adset child folders', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'image-only-folders-'));
   const assetRoot = path.join(root, 'F_I_O_L_0520');
@@ -349,4 +367,23 @@ test('VIDEO_ONLY fails when there are not enough video assets', async () => {
     }, { baseDir: root, date: fixedDate }),
     /VIDEO_ONLY requires at least 4 video assets. Found 1./,
   );
+});
+
+test('VIDEO_ONLY allows ADSET_COUNT=0 as one actual adset', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'video-only-zero-adset-'));
+  const assetRoot = path.join(root, 'desktop', '260520 올레놀샷 틱톡세팅');
+  await fs.mkdir(assetRoot, { recursive: true });
+  await fs.writeFile(path.join(assetRoot, 'F_V_O_L_0520_1.mp4'), '');
+  await fs.writeFile(path.join(assetRoot, 'F_V_O_L_0520_2.mp4'), '');
+
+  const plan = await buildVideoOnlyPlan({
+    CAMPAIGN_MODE: 'VIDEO_ONLY',
+    ADSET_COUNT: '0',
+    AD_CREATIVE_COUNT: '1',
+    VIDEO_ONLY_ASSET_ROOT: './desktop',
+  }, { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.adsetCount, 1);
+  assert.equal(plan.totalAds, 2);
+  assert.deepEqual(plan.adsets[0].ads.map((ad) => ad.name), ['f_v_o_l_0520_1', 'f_v_o_l_0520_2']);
 });
