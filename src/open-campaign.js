@@ -118,6 +118,56 @@ async function pause(page, label, ms = 2000) {
   await page.waitForTimeout(ms);
 }
 
+async function hasLargeUploadFile(files, limitBytes = 50 * 1024 * 1024) {
+  for (const file of files) {
+    const stat = await fs.stat(file).catch(() => null);
+    if (stat?.size > limitBytes) return true;
+  }
+  return false;
+}
+
+async function setFilesViaCDP(page, files) {
+  const client = await page.context().newCDPSession(page);
+  const { result } = await client.send('Runtime.evaluate', {
+    expression: `document.querySelector('input[type="file"]')`,
+    returnByValue: false,
+  });
+
+  if (!result?.objectId) {
+    throw new Error('file input object not found for CDP upload fallback');
+  }
+
+  await client.send('DOM.setFileInputFiles', {
+    objectId: result.objectId,
+    files,
+  });
+}
+
+async function uploadFilesToCurrentPicker(page, fileChooser, files, adFormat) {
+  const largeUpload = await hasLargeUploadFile(files);
+  const useCdpUpload = adFormat === 'video' || largeUpload;
+
+  if (useCdpUpload) {
+    console.log('[STEP] large/video upload detected - using CDP local file path upload:', {
+      adFormat,
+      largeUpload,
+      files,
+    });
+    await page.locator('input[type="file"]').first().waitFor({ timeout: 30000 }).catch(() => null);
+    await setFilesViaCDP(page, files);
+    return;
+  }
+
+  if (fileChooser) {
+    await fileChooser.setFiles(files);
+    return;
+  }
+
+  const fileInput = page.locator('input[type="file"]').first();
+  await fileInput.waitFor({ timeout: 30000 });
+  await fileInput.setInputFiles(files);
+}
+
 async function debugDump(page, reason) {
   const placeholders = await page.locator('input[placeholder]').evaluateAll((els) => els.map((el) => el.getAttribute('placeholder') || '')).catch(() => []);
   const inputValues = await page.locator('input').evaluateAll((els) => els.map((el) => el.value || '')).catch(() => []);
@@ -1368,19 +1418,22 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
   });
 
   const fileChooser = await fileChooserPromise;
-  if (fileChooser) {
-    await fileChooser.setFiles(files);
-  } else {
-    const fileInput = page.locator('input[type="file"]').first();
-    await fileInput.waitFor({ timeout: 30000 });
-    await fileInput.setInputFiles(files);
-  }
+  await uploadFilesToCurrentPicker(page, fileChooser, files, adFormat);
 
-  await page.waitForTimeout(7000);
+  await page.waitForTimeout(adFormat === 'video' ? 10000 : 3000);
   console.log('[STEP] 바탕화면 날짜 폴더 이미지 전체 업로드 완료:', {
     uploadFolder,
     fileCount: files.length,
   });
+
+  if (explicitFiles?.length) {
+    if (!(await isOneMediaSelected(page))) {
+      console.log('[STEP] uploaded media is not selected yet - clicking visible media once:', { targetAdName, adFormat });
+      await clickVisibleMediaImageOnce(page, targetAdName);
+    }
+    await completeMediaPickerNextAndOriginalFlow(page);
+    return;
+  }
 
   await searchAndSelectExistingMedia(page, targetAdName);
 }
@@ -2021,7 +2074,7 @@ async function clickMediaPickerButton(page, buttonText, attemptLabel, dataSurfac
     await candidate.locator.click({ force: true }).catch(async () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(2500);
     console.log('[STEP] 미디어 선택 버튼 클릭 완료:', { buttonText, attemptLabel, candidate: candidate.name });
     return true;
   }
@@ -2052,7 +2105,7 @@ async function selectAllOriginalRadios(page) {
         await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       });
       selectedCount += 1;
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(200);
     }
   }
   console.log('[STEP] 원본(original) 라디오 선택 완료:', { selectedCount });
@@ -2066,7 +2119,7 @@ async function completeMediaPickerNextAndOriginalFlow(page) {
     throw new Error('이미지 선택 후 다음 버튼을 찾지 못했습니다.');
   }
 
-  await page.waitForTimeout(1800);
+  await page.waitForTimeout(800);
   await selectAllOriginalRadios(page);
 
   const cropNext = await clickMediaPickerNextButton(page, 'after-original-crop');
@@ -2087,7 +2140,7 @@ async function completeMediaPickerNextAndOriginalFlow(page) {
     throw new Error('이미지 생성 단계 완료 버튼을 찾지 못했습니다.');
   }
 
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(1000);
   console.log('[STEP] 이미지 선택/자르기/문구/생성 완료 흐름 완료');
 }
 
