@@ -2168,7 +2168,29 @@ async function clickMediaPickerDoneButton(page, attemptLabel) {
 }
 
 async function clickMediaPickerSkipAndContinueButton(page, attemptLabel) {
-  return clickMediaPickerButton(page, '건너뛰고 계속하기', attemptLabel, 'ads-omp-primary-button');
+  const exactClicked = await clickMediaPickerButton(page, '건너뛰고 계속하기', attemptLabel, 'ads-omp-primary-button');
+  if (exactClicked) return true;
+
+  const candidates = [
+    page.getByRole('button', { name: /건너뛰고\s*계속/i }).first(),
+    page.getByText(/건너뛰고\s*계속/i).first(),
+    page.locator('[role="button"]').filter({ hasText: /건너뛰고\s*계속/i }).first(),
+  ];
+
+  for (const locator of candidates) {
+    const visible = await locator.isVisible({ timeout: 2000 }).catch(() => false);
+    if (!visible) continue;
+    await locator.scrollIntoViewIfNeeded().catch(() => null);
+    await locator.click({ force: true }).catch(async () => {
+      const box = await locator.boundingBox().catch(() => null);
+      if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    });
+    await page.waitForTimeout(2500);
+    console.log('[STEP] 건너뛰고 계속하기 버튼 클릭 완료:', { attemptLabel });
+    return true;
+  }
+
+  return false;
 }
 
 async function selectAllOriginalRadios(page) {
@@ -2205,10 +2227,16 @@ async function getOriginalRadioStatus(page) {
 }
 
 async function completeVideoMediaPickerFlow(page) {
+  const selectedNext = await clickMediaPickerNextButton(page, 'video-after-media-select');
+  if (!selectedNext) {
+    await debugDump(page, 'next button not found after video media select');
+    throw new Error('동영상 선택 후 다음 버튼을 찾지 못했습니다.');
+  }
+
   const skipped = await clickMediaPickerSkipAndContinueButton(page, 'video-skip-processing');
   if (!skipped) {
-    await debugDump(page, 'skip and continue button not found after video upload');
-    throw new Error('동영상 업로드 후 건너뛰고 계속하기 버튼을 찾지 못했습니다.');
+    await debugDump(page, 'skip and continue button not found after video next');
+    throw new Error('동영상 다음 단계 후 건너뛰고 계속하기 버튼을 찾지 못했습니다.');
   }
 
   await page.waitForTimeout(1000);
