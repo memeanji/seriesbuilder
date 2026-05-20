@@ -2538,14 +2538,15 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const isAdCopy = rowText.includes('새 판매 광고') || rowText.includes('광고 - 사본') || rowText.includes('광고명');
       const isBlogAdsetNameRow = isBlogMixedCampaign() && /f_i_b_o_l_\d{4}_\d+/i.test(rowText);
       const isBlogAdsetCopyRow = isBlogAdsetNameRow && /사본|copy/i.test(rowText);
-      const shouldRenameAdsetRow = (isAdsetCopy || isBlogAdsetNameRow) && adsetIndex <= adsetEndIndex;
+      const isImageOnlyAdsetNameRow = !isBlogMixedCampaign() && /\d{4}\s+리타겟\s+\d+번\s+광고세트/i.test(rowText);
+      const shouldRenameAdsetRow = (isAdsetCopy || isBlogAdsetNameRow || isImageOnlyAdsetNameRow) && adsetIndex <= adsetEndIndex;
 
       if (processedAdsetRows.has(rowKey) && (rowText.includes('광고세트') || rowText.includes(ADSET_BASE_NAME) || isBlogAdsetNameRow)) {
         console.log('[DEBUG] 이미 처리한 광고세트 row 건너뜀:', { rowKey, rowText: rowText.slice(0, 120) });
         continue;
       }
 
-      if (isAlreadyTargetAdset && !isBlogAdsetCopyRow && !isBlogMixedCampaign() && adsetIndex <= adsetEndIndex) {
+      if (isAlreadyTargetAdset && !isBlogAdsetCopyRow && isBlogMixedCampaign() && adsetIndex <= adsetEndIndex) {
         processedAdsetRows.add(rowKey);
         console.log('[STEP] 광고세트명 이미 변경됨 - 다음 광고세트로 이동:', { targetAdsetName, rowKey });
         adsetIndex += 1;
