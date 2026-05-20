@@ -2336,7 +2336,7 @@ async function fillLandingUrlOnly(page, targetAdName, landingUrl = '') {
 
     const landingVisible = await landingInput.isVisible({ timeout: 5000 }).catch(() => false);
     if (landingVisible) {
-      console.log('[STEP] 랜딩 URL 입력 시작(크리에이티브 설정 단계 주석 처리 모드)');
+      console.log('[STEP] 랜딩 URL 입력 시작');
       await landingInput.click({ force: true });
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
       await page.keyboard.press('Backspace');
@@ -2616,7 +2616,6 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           targetAssetPath,
         });
 
-        // await openCreativeSettingsAndFillLandingUrl(page, targetAdName, targetLandingUrl, targetAdFormat);
         await fillLandingUrlOnly(page, targetAdName, targetLandingUrl);
         await page.waitForTimeout(5000);
         console.log('[STEP] 랜딩 URL 단계 완료 후 안정화 대기 완료:', { targetAdName });
