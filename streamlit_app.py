@@ -285,13 +285,14 @@ else:
         "Image media folder",
         value=env.get("IMAGE_ONLY_ASSET_ROOT") or env.get("MEDIA_FOLDER_PATH") or default_image_root(),
     )
+    image_effective_adset_count = int(adset_count) + 1
     with st.expander("Expected folder names", expanded=True):
-        detected_folder_names = read_child_folder_names(media_folder, int(adset_count))
+        detected_folder_names = read_child_folder_names(media_folder, image_effective_adset_count)
         if detected_folder_names:
             st.caption("Detected from Image media folder.")
         else:
             st.caption("No child folders detected yet. Showing recommended folder names.")
-        for index in range(1, int(adset_count) + 1):
+        for index in range(1, image_effective_adset_count + 1):
             folder_name = detected_folder_names[index - 1] if index <= len(detected_folder_names) else expected_image_folder_name(index, daily_budget, int(creative_count) + 1, schedule_time)
             st.write(f"{index}. `{folder_name}`")
     next_env["AD_CREATIVE_COUNT"] = str(creative_count)
