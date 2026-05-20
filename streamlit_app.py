@@ -136,10 +136,18 @@ def expected_blog_folder_name(adset_index: int, budget: str, schedule_time: str)
 
 
 def expected_image_folder_name(adset_index: int, budget: str, creative_count: int, schedule_time: str) -> str:
-    mmdd = datetime.now().strftime("%m%d")
     budget_manwon = int(int(budget or "0") / 10000)
     hour = schedule_time.split(":", 1)[0].zfill(2)
-    return f"{mmdd} {adset_index}번 광고세트-일예산 {budget_manwon}만원-이미지 {creative_count}개-익일 {hour}시"
+    return f"메타 리타겟 소재-{adset_index}번 세트-일예산 {budget_manwon}만원_익일 {hour}시 세팅"
+
+
+def read_child_folder_names(root: str, limit: int) -> list[str]:
+    root_path = Path(root).expanduser()
+    if not root_path.exists() or not root_path.is_dir():
+        return []
+
+    folders = [item.name for item in root_path.iterdir() if item.is_dir()]
+    return sorted(folders)[:limit]
 
 
 def validate_form(values: dict[str, str]) -> list[str]:
@@ -263,8 +271,14 @@ else:
         value=env.get("IMAGE_ONLY_ASSET_ROOT") or env.get("MEDIA_FOLDER_PATH") or default_image_root(),
     )
     with st.expander("Expected folder names", expanded=True):
+        detected_folder_names = read_child_folder_names(media_folder, int(adset_count))
+        if detected_folder_names:
+            st.caption("Detected from Image media folder.")
+        else:
+            st.caption("No child folders detected yet. Showing recommended folder names.")
         for index in range(1, int(adset_count) + 1):
-            st.write(f"{index}. `{expected_image_folder_name(index, daily_budget, int(creative_count), schedule_time)}`")
+            folder_name = detected_folder_names[index - 1] if index <= len(detected_folder_names) else expected_image_folder_name(index, daily_budget, int(creative_count), schedule_time)
+            st.write(f"{index}. `{folder_name}`")
     next_env["AD_CREATIVE_COUNT"] = str(creative_count)
     next_env["IMAGE_ONLY_UPLOAD_MODE"] = "PER_AD" if per_ad_upload else ""
     next_env["IMAGE_ONLY_ASSET_ROOT"] = media_folder if per_ad_upload else ""
