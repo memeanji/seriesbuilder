@@ -78,7 +78,7 @@ IMAGE_ONLY_ASSET_ROOT=
 기존 이미지 전용 모드입니다. 기존 `.env`와 호환됩니다.
 
 - 광고세트명은 기존 `MMDD {ADSET_BASE_NAME} {index}번 광고세트` 규칙을 유지합니다.
-- 광고명은 기존 `f_i_o_l_MMDD_XX` 규칙을 유지합니다.
+- 광고명은 `f_i_o_l_MMDD_1`, `f_i_o_l_MMDD_2`, ..., `f_i_o_l_MMDD_10`처럼 패딩 없는 인덱스 규칙을 사용합니다.
 - 랜딩 URL도 기존 광고명 기반 URL 생성 방식을 유지합니다.
 - 기존 이미지 업로드/검색 흐름을 그대로 사용합니다.
 - 더 빠른 1개 광고당 1개 이미지 업로드를 쓰려면 `IMAGE_ONLY_UPLOAD_MODE=PER_AD`를 켭니다.

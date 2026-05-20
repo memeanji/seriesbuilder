@@ -93,7 +93,7 @@ function getTodayMMDD() {
 }
 
 function getAdName(index) {
-  return `f_i_o_l_${getTodayMMDD()}_${String(index).padStart(2, '0')}`;
+  return `f_i_o_l_${getTodayMMDD()}_${index}`;
 }
 
 function getLandingCampaignName(adName) {
