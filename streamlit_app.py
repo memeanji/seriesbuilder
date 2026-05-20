@@ -123,11 +123,23 @@ def default_blog_root() -> str:
     return str(Path.home() / "Desktop" / f"F_I_B_O_L_{mmdd}")
 
 
+def default_image_root() -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    return str(Path.home() / "Desktop" / f"F_I_O_L_{mmdd}")
+
+
 def expected_blog_folder_name(adset_index: int, budget: str, schedule_time: str) -> str:
     mmdd = datetime.now().strftime("%m%d")
     budget_manwon = int(int(budget or "0") / 10000)
     hour = schedule_time.split(":", 1)[0].zfill(2)
     return f"{mmdd} {adset_index}번 광고세트-일예산 {budget_manwon}만원-이미지 4개 + 영상 1개-익일 {hour}시"
+
+
+def expected_image_folder_name(adset_index: int, budget: str, creative_count: int, schedule_time: str) -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    budget_manwon = int(int(budget or "0") / 10000)
+    hour = schedule_time.split(":", 1)[0].zfill(2)
+    return f"{mmdd} {adset_index}번 광고세트-일예산 {budget_manwon}만원-이미지 {creative_count}개-익일 {hour}시"
 
 
 def validate_form(values: dict[str, str]) -> list[str]:
@@ -246,7 +258,13 @@ else:
         "Upload one image per ad",
         value=env.get("IMAGE_ONLY_UPLOAD_MODE", "").upper() == "PER_AD",
     )
-    media_folder = st.text_input("Image media folder", value=env.get("IMAGE_ONLY_ASSET_ROOT") or env.get("MEDIA_FOLDER_PATH", ""))
+    media_folder = st.text_input(
+        "Image media folder",
+        value=env.get("IMAGE_ONLY_ASSET_ROOT") or env.get("MEDIA_FOLDER_PATH") or default_image_root(),
+    )
+    with st.expander("Expected folder names", expanded=True):
+        for index in range(1, int(adset_count) + 1):
+            st.write(f"{index}. `{expected_image_folder_name(index, daily_budget, int(creative_count), schedule_time)}`")
     next_env["AD_CREATIVE_COUNT"] = str(creative_count)
     next_env["IMAGE_ONLY_UPLOAD_MODE"] = "PER_AD" if per_ad_upload else ""
     next_env["IMAGE_ONLY_ASSET_ROOT"] = media_folder if per_ad_upload else ""
