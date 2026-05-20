@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -28,7 +28,7 @@ def read_env(path: Path = ENV_PATH) -> dict[str, str]:
     return values
 
 
-def write_env(values: dict[str, str], path: Path = ENV_PATH) -> None:
+def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
     mode = values.get("CAMPAIGN_MODE", "IMAGE_ONLY")
     lines = [
         f"AD_ACCOUNT_ID={values.get('AD_ACCOUNT_ID', '')}",
@@ -81,7 +81,9 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> None:
             "",
         ]
     )
-    path.write_text("\n".join(lines), encoding="utf-8")
+    content = "\n".join(lines)
+    path.write_text(content, encoding="utf-8")
+    return content
 
 
 def run_command(command: list[str], timeout: int = 300) -> tuple[int, str]:
@@ -92,6 +94,8 @@ def run_command(command: list[str], timeout: int = 300) -> tuple[int, str]:
         capture_output=True,
         timeout=timeout,
         shell=False,
+        encoding="utf-8",
+        errors="replace",
     )
     output = "\n".join(part for part in [completed.stdout, completed.stderr] if part)
     return completed.returncode, output
@@ -117,23 +121,38 @@ def default_blog_root() -> str:
     return str(Path.home() / "Desktop" / f"F_I_B_O_L_{mmdd}")
 
 
-def schedule_label(schedule_time: str) -> str:
-    hour = schedule_time.split(":", 1)[0].zfill(2)
-    return f"{hour}시"
-
-
 def expected_blog_folder_name(adset_index: int, budget: str, schedule_time: str) -> str:
     mmdd = datetime.now().strftime("%m%d")
     budget_manwon = int(int(budget or "0") / 10000)
-    return f"{mmdd} {adset_index}번 광고세트-일예산 {budget_manwon}만원-이미지 4개 + 영상 1개-익일 {schedule_label(schedule_time)}"
+    hour = schedule_time.split(":", 1)[0].zfill(2)
+    return f"{mmdd} {adset_index}번 광고세트-일예산 {budget_manwon}만원-이미지 4개 + 영상 1개-익일 {hour}시"
 
 
-def show_command_result(title: str, code: int, output: str) -> None:
+def validate_form(values: dict[str, str]) -> list[str]:
+    errors: list[str] = []
+    if not values.get("CAMPAIGN_NAME", "").strip():
+        errors.append("CAMPAIGN_NAME is required.")
+    if not values.get("AD_ACCOUNT_ID", "").strip():
+        errors.append("AD_ACCOUNT_ID is required.")
+    if values.get("CAMPAIGN_MODE") == "BLOG_MIXED":
+        if not values.get("BLOG_ASSET_ROOT", "").strip():
+            errors.append("BLOG_ASSET_ROOT is required for BLOG_MIXED.")
+        adset_count = int(values.get("ADSET_COUNT", "1") or "1")
+        for index in range(1, adset_count + 1):
+            if not values.get(f"BLOG_LANDING_URL_{index}", "").strip():
+                errors.append(f"BLOG_LANDING_URL_{index} is required.")
+    return errors
+
+
+def show_command_result(title: str, command: list[str], code: int, output: str) -> None:
     if code == 0:
-        st.success(f"{title} 완료")
+        st.success(f"{title} completed")
     else:
-        st.error(f"{title} 실패: exit code {code}")
-    st.code(output or "(no output)", language="text")
+        st.error(f"{title} failed: exit code {code}")
+    st.caption("Command")
+    st.code(" ".join(command), language="text")
+    st.caption("Output")
+    st.code(output if output.strip() else "(empty output)", language="text")
 
 
 st.set_page_config(page_title="Meta Ads Automation", layout="wide")
@@ -142,49 +161,51 @@ st.title("Meta Ads Automation MVP")
 env = read_env()
 
 with st.sidebar:
-    st.subheader("작업")
-    if st.button("최근 코드 받아오기"):
-        code, output = run_command(["git", "pull", "origin", "main"])
-        show_command_result("git pull", code, output)
+    st.subheader("Actions")
+    if st.button("Pull latest code"):
+        command = ["git", "pull", "origin", "main"]
+        code, output = run_command(command)
+        show_command_result("git pull", command, code, output)
 
-    if st.button("패키지 동기화"):
-        code, output = run_command(["npm.cmd", "install"], timeout=600)
-        show_command_result("npm install", code, output)
+    if st.button("Install npm packages"):
+        command = ["npm.cmd", "install"]
+        code, output = run_command(command, timeout=600)
+        show_command_result("npm install", command, code, output)
 
-    if st.button(".env VS Code로 열기"):
+    if st.button("Open .env in VS Code"):
         subprocess.Popen(["code.cmd", str(ENV_PATH)], cwd=APP_DIR, shell=False)
-        st.info(".env를 VS Code로 열었습니다.")
+        st.info(".env open requested.")
 
-    if st.button("Chrome CDP 열기"):
+    if st.button("Open Chrome CDP"):
         account_id = env.get("AD_ACCOUNT_ID", DEFAULT_ACCOUNT_ID)
         url = f"{ADS_MANAGER_URL}?act={account_id}"
         chrome = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
         command = f'& "{chrome}" --remote-debugging-port=9222 --user-data-dir="C:\\chrome-debug" "{url}"'
         start_powershell(command)
-        st.info("Chrome CDP 창을 열었습니다.")
+        st.info("Chrome CDP PowerShell opened.")
 
-    if st.button("자동화 실행 터미널 열기"):
+    if st.button("Open automation terminal"):
         start_powershell("npm run open-campaign")
-        st.info("별도 PowerShell에서 자동화를 실행했습니다.")
+        st.info("Automation PowerShell opened.")
 
 
-st.subheader("캠페인 설정")
+st.subheader("Campaign Settings")
 
 left, right = st.columns(2)
 with left:
     campaign_mode = st.selectbox(
-        "캠페인 유형",
+        "Campaign mode",
         ["BLOG_MIXED", "IMAGE_ONLY"],
         index=0 if env.get("CAMPAIGN_MODE", "IMAGE_ONLY") == "BLOG_MIXED" else 1,
     )
     dry_run = st.toggle("DRY_RUN", value=env.get("DRY_RUN", "true").lower() == "true")
-    ad_account_id = st.text_input("광고 계정 ID", value=env.get("AD_ACCOUNT_ID", DEFAULT_ACCOUNT_ID))
-    campaign_name = st.text_input("캠페인명", value=env.get("CAMPAIGN_NAME", ""))
+    ad_account_id = st.text_input("Ad account ID", value=env.get("AD_ACCOUNT_ID", DEFAULT_ACCOUNT_ID))
+    campaign_name = st.text_input("Campaign name", value=env.get("CAMPAIGN_NAME", ""))
 
 with right:
-    adset_count = st.number_input("광고세트 수", min_value=1, max_value=100, value=int(env.get("ADSET_COUNT", "3") or "3"))
-    daily_budget = st.text_input("일예산", value=env.get("ADSET_DAILY_BUDGET", "300000"))
-    schedule_time = st.text_input("예약 시간", value=env.get("SCHEDULE_TIME", "05:00"))
+    adset_count = st.number_input("Adset count", min_value=1, max_value=100, value=int(env.get("ADSET_COUNT", "3") or "3"))
+    daily_budget = st.text_input("Daily budget", value=env.get("ADSET_DAILY_BUDGET", "300000"))
+    schedule_time = st.text_input("Schedule time", value=env.get("SCHEDULE_TIME", "05:00"))
     cdp_url = st.text_input("CDP URL", value=env.get("CDP_URL", "http://127.0.0.1:9222"))
 
 next_env: dict[str, str] = {
@@ -200,23 +221,23 @@ next_env: dict[str, str] = {
 }
 
 if campaign_mode == "BLOG_MIXED":
-    st.subheader("BLOG_MIXED 설정")
-    st.caption("이미지 4개 + 동영상 1개는 고정값으로 저장됩니다.")
-    blog_root = st.text_input("블로그 소재 루트 폴더", value=env.get("BLOG_ASSET_ROOT", default_blog_root()))
+    st.subheader("BLOG_MIXED")
+    st.caption("Fixed structure: 4 image ads + 1 video ad per adset.")
+    blog_root = st.text_input("Blog asset root", value=env.get("BLOG_ASSET_ROOT", default_blog_root()))
     next_env["BLOG_ASSET_ROOT"] = blog_root
 
-    with st.expander("예상 폴더명 확인", expanded=True):
+    with st.expander("Expected folder names", expanded=True):
         for index in range(1, int(adset_count) + 1):
             st.write(f"{index}. `{expected_blog_folder_name(index, daily_budget, schedule_time)}`")
 
-    st.subheader("광고세트별 랜딩 URL")
+    st.subheader("Landing URLs")
     for index in range(1, int(adset_count) + 1):
         key = f"BLOG_LANDING_URL_{index}"
-        next_env[key] = st.text_input(f"광고세트 {index} 랜딩 URL", value=env.get(key, ""))
+        next_env[key] = st.text_input(f"Adset {index} landing URL", value=env.get(key, ""))
 else:
-    st.subheader("IMAGE_ONLY 설정")
-    creative_count = st.number_input("이미지 광고 수", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "4") or "4"))
-    media_folder = st.text_input("이미지 소재 폴더", value=env.get("MEDIA_FOLDER_PATH", ""))
+    st.subheader("IMAGE_ONLY")
+    creative_count = st.number_input("Image ad count", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "4") or "4"))
+    media_folder = st.text_input("Image media folder", value=env.get("MEDIA_FOLDER_PATH", ""))
     next_env["AD_CREATIVE_COUNT"] = str(creative_count)
     next_env["MEDIA_FOLDER_PATH"] = media_folder
 
@@ -224,24 +245,44 @@ st.divider()
 
 col1, col2, col3 = st.columns(3)
 with col1:
-    if st.button(".env 저장", type="primary"):
-        write_env(next_env)
-        st.success(f"저장 완료: {ENV_PATH}")
+    if st.button("Save .env", type="primary"):
+        saved = write_env(next_env)
+        st.success(f"Saved: {ENV_PATH}")
+        st.code(saved, language="dotenv")
 
 with col2:
-    if st.button("Dry-run 실행"):
-        write_env({**next_env, "DRY_RUN": "true"})
-        code, output = run_command(["npm.cmd", "run", "open-campaign"], timeout=300)
-        show_command_result("dry-run", code, output)
+    if st.button("Run dry-run"):
+        dry_run_env = {**next_env, "DRY_RUN": "true"}
+        errors = validate_form(dry_run_env)
+        saved = write_env(dry_run_env)
+        st.caption("Saved .env for dry-run")
+        st.code(saved, language="dotenv")
+        if errors:
+            st.error("Fix these fields before dry-run:")
+            for error in errors:
+                st.write(f"- {error}")
+        else:
+            command = ["node", "src/open-campaign.js"]
+            code, output = run_command(command, timeout=300)
+            show_command_result("dry-run", command, code, output)
 
 with col3:
-    if st.button("실제 실행 터미널 열기"):
-        write_env({**next_env, "DRY_RUN": "false"})
-        start_powershell("npm run open-campaign")
-        st.warning("DRY_RUN=false로 저장하고 별도 PowerShell에서 실행했습니다.")
+    if st.button("Run real automation terminal"):
+        real_env = {**next_env, "DRY_RUN": "false"}
+        errors = validate_form(real_env)
+        saved = write_env(real_env)
+        st.caption("Saved .env for real run")
+        st.code(saved, language="dotenv")
+        if errors:
+            st.error("Fix these fields before real run:")
+            for error in errors:
+                st.write(f"- {error}")
+        else:
+            start_powershell("npm run open-campaign")
+            st.warning("DRY_RUN=false saved. Automation terminal opened.")
 
-with st.expander("현재 .env 미리보기", expanded=False):
+with st.expander("Current .env", expanded=False):
     if ENV_PATH.exists():
         st.code(ENV_PATH.read_text(encoding="utf-8"), language="dotenv")
     else:
-        st.info(".env 파일이 아직 없습니다.")
+        st.info(".env does not exist yet.")
