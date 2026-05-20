@@ -54,7 +54,7 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
                 "BLOG_ADSET_NAME_PREFIX=f_i_b_o_l",
                 "BLOG_IMAGE_AD_NAME_PREFIX=f_i_b_o_l",
                 "BLOG_VIDEO_AD_NAME_PREFIX=f_v_b_o_l",
-                "DATE_FORMAT=YYYYMMDD",
+                "DATE_FORMAT=MMDD",
                 "",
                 f"BLOG_ASSET_ROOT={values.get('BLOG_ASSET_ROOT', '')}",
                 "",

@@ -57,7 +57,7 @@ function blogEnv(root, overrides = {}) {
     BLOG_IMAGE_AD_NAME_PREFIX: 'f_i_b_o_l',
     BLOG_VIDEO_AD_NAME_PREFIX: 'f_v_b_o_l',
     TIMEZONE: 'Asia/Seoul',
-    DATE_FORMAT: 'YYYYMMDD',
+    DATE_FORMAT: 'MMDD',
     BLOG_LANDING_URL_1: 'https://example.com/landing-1',
     BLOG_LANDING_URL_2: 'https://example.com/landing-2',
     BLOG_LANDING_URL_3: 'https://example.com/landing-3',
@@ -73,11 +73,11 @@ test('BLOG_LANDING_URL_N maps by adset index', () => {
   assert.equal(getLandingUrlForAdset(3, env), 'https://example.com/landing-3');
 });
 
-test('BLOG_MIXED naming uses Asia/Seoul YYYYMMDD', () => {
+test('BLOG_MIXED naming uses Asia/Seoul MMDD', () => {
   const env = blogEnv(process.cwd());
-  assert.equal(buildBlogAdsetName(1, env, fixedDate), 'f_i_b_o_l_20260520_1');
-  assert.equal(buildBlogImageAdName(4, env, fixedDate), 'f_i_b_o_l_20260520_4');
-  assert.equal(buildBlogVideoAdName(5, env, fixedDate), 'f_v_b_o_l_20260520_5');
+  assert.equal(buildBlogAdsetName(1, env, fixedDate), 'f_i_b_o_l_0520_1');
+  assert.equal(buildBlogImageAdName(4, env, fixedDate), 'f_i_b_o_l_0520_4');
+  assert.equal(buildBlogVideoAdName(5, env, fixedDate), 'f_v_b_o_l_0520_5');
 });
 
 test('missing landing URL fails when ADSET_COUNT requires it', async () => {
@@ -146,7 +146,7 @@ test('dry-run plan lists image and video creatives without API calls', async () 
   const plan = await buildBlogMixedPlan(blogEnv(root), { baseDir: root, date: fixedDate });
   const output = formatDryRunPlan(plan);
   assert.match(output, /campaign mode: BLOG_MIXED/);
-  assert.match(output, /adset 1: f_i_b_o_l_20260520_1/);
-  assert.match(output, /image creative \| ad name: f_i_b_o_l_20260520_1/);
-  assert.match(output, /video creative \| ad name: f_v_b_o_l_20260520_5/);
+  assert.match(output, /adset 1: f_i_b_o_l_0520_1/);
+  assert.match(output, /image creative \| ad name: f_i_b_o_l_0520_1/);
+  assert.match(output, /video creative \| ad name: f_v_b_o_l_0520_5/);
 });

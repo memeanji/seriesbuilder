@@ -115,8 +115,7 @@ BLOG_ADSET_NAME_PREFIX=f_i_b_o_l
 BLOG_IMAGE_AD_NAME_PREFIX=f_i_b_o_l
 BLOG_VIDEO_AD_NAME_PREFIX=f_v_b_o_l
 
-TIMEZONE=Asia/Seoul
-DATE_FORMAT=YYYYMMDD
+DATE_FORMAT=MMDD
 
 BLOG_LANDING_URL_1=https://example.com/landing-1
 BLOG_LANDING_URL_2=https://example.com/landing-2
@@ -129,22 +128,22 @@ BLOG_ASSET_ROOT=./assets/blog
 
 ## BLOG_MIXED 이름 규칙
 
-날짜는 `TIMEZONE=Asia/Seoul` 기준 오늘 날짜를 `YYYYMMDD`로 계산합니다.
+날짜는 오늘 날짜를 `MMDD`로 계산합니다. 예: 5월 20일은 `0520`.
 
 광고세트명:
 
 ```text
-f_i_b_o_l_{YYYYMMDD}_{adset_index}
+f_i_b_o_l_{MMDD}_{adset_index}
 ```
 
 광고명:
 
 ```text
-이미지 광고 1: f_i_b_o_l_{YYYYMMDD}_1
-이미지 광고 2: f_i_b_o_l_{YYYYMMDD}_2
-이미지 광고 3: f_i_b_o_l_{YYYYMMDD}_3
-이미지 광고 4: f_i_b_o_l_{YYYYMMDD}_4
-동영상 광고 5: f_v_b_o_l_{YYYYMMDD}_5
+이미지 광고 1: f_i_b_o_l_{MMDD}_1
+이미지 광고 2: f_i_b_o_l_{MMDD}_2
+이미지 광고 3: f_i_b_o_l_{MMDD}_3
+이미지 광고 4: f_i_b_o_l_{MMDD}_4
+동영상 광고 5: f_v_b_o_l_{MMDD}_5
 ```
 
 위 광고명 규칙은 광고세트마다 반복됩니다.

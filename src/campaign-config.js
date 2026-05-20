@@ -38,7 +38,7 @@ export function readIntegerEnv(env, key, defaultValue) {
 export function getTodayString({
   date = new Date(),
   timezone = 'Asia/Seoul',
-  dateFormat = 'YYYYMMDD',
+  dateFormat = 'MMDD',
 } = {}) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone,
@@ -50,7 +50,7 @@ export function getTodayString({
   const yyyymmdd = `${values.year}${values.month}${values.day}`;
   if (dateFormat === 'YYYYMMDD') return yyyymmdd;
   if (dateFormat === 'MMDD') return `${values.month}${values.day}`;
-  throw new Error(`Unsupported DATE_FORMAT: ${dateFormat}. Use YYYYMMDD.`);
+  throw new Error(`Unsupported DATE_FORMAT: ${dateFormat}. Use MMDD or YYYYMMDD.`);
 }
 
 export function buildBlogAdsetName(adsetIndex, env = process.env, date = new Date()) {
@@ -58,7 +58,7 @@ export function buildBlogAdsetName(adsetIndex, env = process.env, date = new Dat
   const today = getTodayString({
     date,
     timezone: env.TIMEZONE || 'Asia/Seoul',
-    dateFormat: env.DATE_FORMAT || 'YYYYMMDD',
+    dateFormat: env.DATE_FORMAT || 'MMDD',
   });
   return `${prefix}_${today}_${adsetIndex}`;
 }
@@ -68,7 +68,7 @@ export function buildBlogImageAdName(adIndex, env = process.env, date = new Date
   const today = getTodayString({
     date,
     timezone: env.TIMEZONE || 'Asia/Seoul',
-    dateFormat: env.DATE_FORMAT || 'YYYYMMDD',
+    dateFormat: env.DATE_FORMAT || 'MMDD',
   });
   return `${prefix}_${today}_${adIndex}`;
 }
@@ -78,7 +78,7 @@ export function buildBlogVideoAdName(adIndex, env = process.env, date = new Date
   const today = getTodayString({
     date,
     timezone: env.TIMEZONE || 'Asia/Seoul',
-    dateFormat: env.DATE_FORMAT || 'YYYYMMDD',
+    dateFormat: env.DATE_FORMAT || 'MMDD',
   });
   return `${prefix}_${today}_${adIndex}`;
 }
