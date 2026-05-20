@@ -163,6 +163,11 @@ def expected_video_folder_name() -> str:
     return f"{yymmdd} 올레놀샷 틱톡세팅"
 
 
+def expected_video_child_folder_name() -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    return f"{mmdd} 올레놀샷 CBO 캠페인-1"
+
+
 def read_child_folder_names(root: str, limit: int) -> list[str]:
     root_path = Path(root).expanduser()
     if not root_path.exists() or not root_path.is_dir():
@@ -315,6 +320,8 @@ elif campaign_mode == "VIDEO_ONLY":
         else:
             st.caption("No matching folder detected yet. Showing recommended folder name.")
             st.write(f"1. `{expected_video_folder_name()}`")
+        st.caption("Videos may be directly inside that folder, or inside this child folder.")
+        st.write(f"- `{expected_video_child_folder_name()}`")
 
     with st.expander("Landing URL pattern", expanded=True):
         mmdd = datetime.now().strftime("%m%d")

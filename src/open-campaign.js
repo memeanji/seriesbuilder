@@ -2549,7 +2549,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const isBlogAdsetNameRow = isBlogMixedCampaign() && /f_i_b_o_l_\d{4}_\d+/i.test(rowText);
       const isBlogAdsetCopyRow = isBlogAdsetNameRow && /사본|copy/i.test(rowText);
       const isImageOnlyAdsetNameRow = !isBlogMixedCampaign() && /\d{4}\s+리타겟\s+\d+번\s+광고세트/i.test(rowText);
-      const isVideoOnlyAdsetNameRow = isVideoOnlyCampaign() && /\d{4}\s+직접랜딩\s+\d+번\s+광고세트/i.test(rowText);
+      const isVideoOnlyAdsetNameRow = isVideoOnlyCampaign() && /\d{4}\s+직접랜딩\s+광고세트\s*-\s*\d+/i.test(rowText);
       const shouldRenameAdsetRow = (isAdsetCopy || isBlogAdsetNameRow || isImageOnlyAdsetNameRow || isVideoOnlyAdsetNameRow) && adsetIndex <= adsetEndIndex;
 
       if (processedAdsetRows.has(rowKey) && (rowText.includes('광고세트') || rowText.includes(ADSET_BASE_NAME) || isBlogAdsetNameRow)) {

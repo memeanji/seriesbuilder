@@ -104,7 +104,7 @@ export function buildVideoOnlyAdsetName(adsetIndex, env = process.env, date = ne
     dateFormat: env.DATE_FORMAT || 'MMDD',
   });
   const includeIndex = String(env.VIDEO_ONLY_ADSET_NAME_INCLUDE_INDEX || 'true').trim().toLowerCase() !== 'false';
-  return includeIndex ? `${today} 직접랜딩 ${adsetIndex}번 광고세트` : `${today} 직접랜딩 광고세트`;
+  return includeIndex ? `${today} 직접랜딩 광고세트 -${adsetIndex}` : `${today} 직접랜딩 광고세트`;
 }
 
 export function getVideoOnlyLandingUrl(adName) {
@@ -146,6 +146,23 @@ async function listFilesFromDir(dir, extensionPattern) {
     .map((entry) => path.join(dir, entry.name))
     .filter((filePath) => extensionPattern.test(filePath))
     .sort(naturalCompare);
+}
+
+async function listFilesFromDirTree(dir, extensionPattern, maxDepth = 1) {
+  const files = await listFilesFromDir(dir, extensionPattern).catch(() => []);
+  if (maxDepth <= 0) return files;
+
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  const directories = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(dir, entry.name))
+    .sort(naturalCompare);
+
+  for (const directory of directories) {
+    files.push(...await listFilesFromDirTree(directory, extensionPattern, maxDepth - 1));
+  }
+
+  return files.sort(naturalCompare);
 }
 
 function extractImageOnlyAdsetFolderIndex(folderName) {
@@ -490,8 +507,12 @@ export async function getVideoOnlyAssets(env = process.env, options = {}) {
   if (directVideos.length) return directVideos;
 
   const detectedRoot = await findVideoOnlyAssetRoot(resolvedRoot, options);
-  if (!detectedRoot) return [];
-  return listFilesFromDir(detectedRoot, VIDEO_EXTENSIONS);
+  if (detectedRoot) {
+    const detectedVideos = await listFilesFromDirTree(detectedRoot, VIDEO_EXTENSIONS, 2);
+    if (detectedVideos.length) return detectedVideos;
+  }
+
+  return listFilesFromDirTree(resolvedRoot, VIDEO_EXTENSIONS, 2);
 }
 
 export function getVideoOnlyAssetBySequence(assets, sequence) {

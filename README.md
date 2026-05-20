@@ -152,7 +152,7 @@ BLOG_ASSET_ROOT=./assets/blog
 
 동영상 직접랜딩 캠페인 모드입니다. Streamlit에서 `VIDEO_ONLY`를 선택하면 동영상 소재 폴더와 동영상 광고 개수를 입력할 수 있습니다.
 
-- 광고세트명 기본 규칙: `MMDD 직접랜딩 {adset_index}번 광고세트`
+- 광고세트명 기본 규칙: `MMDD 직접랜딩 광고세트 -{adset_index}`
 - 광고명 규칙: `f_v_o_l_MMDD_{global_ad_index}`
 - 랜딩 URL은 광고명으로 자동 생성합니다.
 - `ADSET_COUNT`와 `AD_CREATIVE_COUNT`는 기존 복제 흐름과 맞춰 `+1`개로 실행됩니다.
@@ -171,9 +171,10 @@ f_v_o_l_0520_3 -> https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_
 ```text
 Desktop/
   260520 올레놀샷 틱톡세팅/
-    F_V_O_L_0520_1.mp4
-    F_V_O_L_0520_2.mp4
-    F_V_O_L_0520_3.mov
+    0520 올레놀샷 CBO 캠페인-1/
+      F_V_O_L_0520_1.mp4
+      F_V_O_L_0520_2.mp4
+      F_V_O_L_0520_3.mov
 ```
 
 `.env` 예시:
@@ -191,7 +192,7 @@ DATE_FORMAT=MMDD
 VIDEO_ONLY_ASSET_ROOT=C:\Users\894플러스\Desktop\260520 올레놀샷 틱톡세팅
 ```
 
-`VIDEO_ONLY_ASSET_ROOT`에 위 폴더 자체를 넣어도 되고, 바탕화면처럼 부모 폴더를 넣으면 `YYMMDD 올레놀샷 틱톡세팅` 이름의 하위 폴더를 찾아서 사용합니다.
+`VIDEO_ONLY_ASSET_ROOT`에 위 폴더 자체를 넣어도 되고, 바탕화면처럼 부모 폴더를 넣으면 `YYMMDD 올레놀샷 틱톡세팅` 이름의 하위 폴더를 찾아서 사용합니다. 영상은 `260520 올레놀샷 틱톡세팅` 바로 아래에 있어도 되고, `0520 올레놀샷 CBO 캠페인-1` 같은 하위 폴더 안에 있어도 순서대로 읽습니다.
 
 ## BLOG_MIXED 이름 규칙
 
