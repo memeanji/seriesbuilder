@@ -292,7 +292,7 @@ else:
         else:
             st.caption("No child folders detected yet. Showing recommended folder names.")
         for index in range(1, int(adset_count) + 1):
-            folder_name = detected_folder_names[index - 1] if index <= len(detected_folder_names) else expected_image_folder_name(index, daily_budget, int(creative_count), schedule_time)
+            folder_name = detected_folder_names[index - 1] if index <= len(detected_folder_names) else expected_image_folder_name(index, daily_budget, int(creative_count) + 1, schedule_time)
             st.write(f"{index}. `{folder_name}`")
     next_env["AD_CREATIVE_COUNT"] = str(creative_count)
     next_env["IMAGE_ONLY_UPLOAD_MODE"] = "PER_AD" if per_ad_upload else ""

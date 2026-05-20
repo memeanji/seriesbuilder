@@ -2173,7 +2173,7 @@ async function clickMediaPickerButton(page, buttonText, attemptLabel, dataSurfac
     await candidate.locator.click({ force: true }).catch(async () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(1000);
     console.log('[STEP] 미디어 선택 버튼 클릭 완료:', { buttonText, attemptLabel, candidate: candidate.name });
     return true;
   }
@@ -2207,7 +2207,7 @@ async function clickMediaPickerSkipAndContinueButton(page, attemptLabel) {
       const box = await locator.boundingBox().catch(() => null);
       if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(1000);
     console.log('[STEP] 건너뛰고 계속하기 버튼 클릭 완료:', { attemptLabel });
     return true;
   }
@@ -2298,7 +2298,7 @@ async function completeMediaPickerNextAndOriginalFlow(page, adFormat = 'image') 
     throw new Error('이미지 선택 후 다음 버튼을 찾지 못했습니다.');
   }
 
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(400);
   await selectAllOriginalRadios(page);
 
   const cropNext = await clickMediaPickerNextButton(page, 'after-original-crop');
@@ -2319,7 +2319,7 @@ async function completeMediaPickerNextAndOriginalFlow(page, adFormat = 'image') 
     throw new Error('이미지 생성 단계 완료 버튼을 찾지 못했습니다.');
   }
 
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(500);
   console.log('[STEP] 이미지 선택/자르기/문구/생성 완료 흐름 완료');
 }
 
