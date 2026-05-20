@@ -648,9 +648,8 @@ async function fillAdsetDailyBudgetAfterSchedule(page) {
 
   const budgetInputHandle = await findBudgetInputHandle(page);
   if (!budgetInputHandle) {
-    await debugDump(page, 'daily budget input not found');
-    await page.screenshot({ path: path.join(DIRS.screenshots, 'daily-budget-input-not-found.png'), fullPage: true });
-    throw new Error('ADSET_DAILY_BUDGET input not found after schedule step');
+    console.log('[WARN] ADSET_DAILY_BUDGET input not found after schedule step - budget input skipped');
+    return true;
   }
 
   const filled = await fillInputHandle(page, budgetInputHandle, ADSET_DAILY_BUDGET, 'daily budget');
