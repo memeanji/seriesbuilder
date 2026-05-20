@@ -1497,7 +1497,7 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
     await uploadFilesToCurrentPicker(page, fileChooser, files, adFormat);
   }
 
-  await page.waitForTimeout(adFormat === 'video' ? 10000 : 3000);
+  await page.waitForTimeout(adFormat === 'video' ? 20000 : 3000);
   console.log('[STEP] 바탕화면 날짜 폴더 이미지 전체 업로드 완료:', {
     uploadFolder,
     fileCount: files.length,
@@ -1508,7 +1508,7 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
       console.log('[STEP] uploaded media is not selected yet - clicking visible media once:', { targetAdName, adFormat });
       await clickVisibleMediaImageOnce(page, targetAdName);
     }
-    await completeMediaPickerNextAndOriginalFlow(page);
+    await completeMediaPickerNextAndOriginalFlow(page, adFormat);
     return;
   }
 
@@ -2167,6 +2167,10 @@ async function clickMediaPickerDoneButton(page, attemptLabel) {
   return clickMediaPickerButton(page, '완료', attemptLabel, 'ads-omp-primary-button');
 }
 
+async function clickMediaPickerSkipAndContinueButton(page, attemptLabel) {
+  return clickMediaPickerButton(page, '건너뛰고 계속하기', attemptLabel, 'ads-omp-primary-button');
+}
+
 async function selectAllOriginalRadios(page) {
   let selectedCount = 0;
   for (let attempt = 1; attempt <= 4; attempt += 1) {
@@ -2189,7 +2193,55 @@ async function selectAllOriginalRadios(page) {
   return selectedCount;
 }
 
-async function completeMediaPickerNextAndOriginalFlow(page) {
+async function getOriginalRadioStatus(page) {
+  return page
+    .locator('input[type="radio"][value="original"]')
+    .evaluateAll((radios) => radios.map((radio) => ({
+      checked: radio.checked || radio.getAttribute('aria-checked') === 'true',
+      name: radio.getAttribute('name') || '',
+      ariaLabel: radio.getAttribute('aria-label') || '',
+    })))
+    .catch(() => []);
+}
+
+async function completeVideoMediaPickerFlow(page) {
+  const skipped = await clickMediaPickerSkipAndContinueButton(page, 'video-skip-processing');
+  if (!skipped) {
+    await debugDump(page, 'skip and continue button not found after video upload');
+    throw new Error('동영상 업로드 후 건너뛰고 계속하기 버튼을 찾지 못했습니다.');
+  }
+
+  await page.waitForTimeout(1000);
+  await selectAllOriginalRadios(page);
+  const originalStatus = await getOriginalRadioStatus(page);
+  console.log('[STEP] 동영상 original 비율 선택 상태 확인:', {
+    total: originalStatus.length,
+    checked: originalStatus.filter((radio) => radio.checked).length,
+    originalStatus,
+  });
+
+  const cropNext = await clickMediaPickerNextButton(page, 'video-after-original');
+  if (!cropNext) {
+    await debugDump(page, 'next button not found after video original');
+    throw new Error('동영상 original 선택 후 다음 버튼을 찾지 못했습니다.');
+  }
+
+  const doneClicked = await clickMediaPickerDoneButton(page, 'video-generation-complete');
+  if (!doneClicked) {
+    await debugDump(page, 'done button not found after video generation');
+    throw new Error('동영상 생성 단계 완료 버튼을 찾지 못했습니다.');
+  }
+
+  await page.waitForTimeout(1000);
+  console.log('[STEP] 동영상 업로드/건너뛰기/original/완료 흐름 완료');
+}
+
+async function completeMediaPickerNextAndOriginalFlow(page, adFormat = 'image') {
+  if (adFormat === 'video') {
+    await completeVideoMediaPickerFlow(page);
+    return;
+  }
+
   const selectedNext = await clickMediaPickerNextButton(page, 'after-media-select');
   if (!selectedNext) {
     await debugDump(page, 'next button not found after media select');
