@@ -1,0 +1,15 @@
+{
+  "name": "meta-ads-playwright-automation",
+  "version": "1.0.0",
+  "description": "Playwright + Node.js automation for opening a campaign in Meta Ads Manager",
+  "type": "module",
+  "scripts": {
+    "login": "node src/login.js",
+    "open-campaign": "node src/open-campaign.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "playwright": "^1.54.0"
+  }
+}
