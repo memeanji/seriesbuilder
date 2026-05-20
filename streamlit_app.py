@@ -69,6 +69,8 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
             [
                 f"AD_CREATIVE_COUNT={values.get('AD_CREATIVE_COUNT', '4')}",
                 "AD_FORMAT=image",
+                f"IMAGE_ONLY_UPLOAD_MODE={values.get('IMAGE_ONLY_UPLOAD_MODE', '')}",
+                f"IMAGE_ONLY_ASSET_ROOT={values.get('IMAGE_ONLY_ASSET_ROOT', '')}",
                 f"MEDIA_FOLDER_PATH={values.get('MEDIA_FOLDER_PATH', '')}",
                 "",
             ]
@@ -141,6 +143,9 @@ def validate_form(values: dict[str, str]) -> list[str]:
         for index in range(1, adset_count + 1):
             if not values.get(f"BLOG_LANDING_URL_{index}", "").strip():
                 errors.append(f"BLOG_LANDING_URL_{index} is required.")
+    elif values.get("IMAGE_ONLY_UPLOAD_MODE") == "PER_AD":
+        if not (values.get("IMAGE_ONLY_ASSET_ROOT", "").strip() or values.get("MEDIA_FOLDER_PATH", "").strip()):
+            errors.append("IMAGE_ONLY PER_AD requires IMAGE_ONLY_ASSET_ROOT or MEDIA_FOLDER_PATH.")
     return errors
 
 
@@ -237,8 +242,14 @@ if campaign_mode == "BLOG_MIXED":
 else:
     st.subheader("IMAGE_ONLY")
     creative_count = st.number_input("Image ad count", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "4") or "4"))
-    media_folder = st.text_input("Image media folder", value=env.get("MEDIA_FOLDER_PATH", ""))
+    per_ad_upload = st.checkbox(
+        "Upload one image per ad",
+        value=env.get("IMAGE_ONLY_UPLOAD_MODE", "").upper() == "PER_AD",
+    )
+    media_folder = st.text_input("Image media folder", value=env.get("IMAGE_ONLY_ASSET_ROOT") or env.get("MEDIA_FOLDER_PATH", ""))
     next_env["AD_CREATIVE_COUNT"] = str(creative_count)
+    next_env["IMAGE_ONLY_UPLOAD_MODE"] = "PER_AD" if per_ad_upload else ""
+    next_env["IMAGE_ONLY_ASSET_ROOT"] = media_folder if per_ad_upload else ""
     next_env["MEDIA_FOLDER_PATH"] = media_folder
 
 st.divider()

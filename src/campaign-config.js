@@ -99,6 +99,14 @@ function splitAssetList(value) {
     .filter(Boolean);
 }
 
+export function isPerAdImageOnlyUploadMode(env = process.env) {
+  return String(env.IMAGE_ONLY_UPLOAD_MODE || '').trim().toUpperCase() === 'PER_AD';
+}
+
+function naturalCompare(a, b) {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
 function resolveAssetPath(assetPath, baseDir = process.cwd()) {
   return path.isAbsolute(assetPath) ? assetPath : path.resolve(baseDir, assetPath);
 }
@@ -109,7 +117,7 @@ async function listFilesFromDir(dir, extensionPattern) {
     .filter((entry) => entry.isFile())
     .map((entry) => path.join(dir, entry.name))
     .filter((filePath) => extensionPattern.test(filePath))
-    .sort((a, b) => a.localeCompare(b));
+    .sort(naturalCompare);
 }
 
 async function pathExists(filePath) {
@@ -346,6 +354,29 @@ export function getBlogAdPlanBySequence(plan, sequence) {
   };
 }
 
+export async function getImageOnlyAssets(env = process.env, options = {}) {
+  const baseDir = options.baseDir || process.cwd();
+  const assetRoot = String(env.IMAGE_ONLY_ASSET_ROOT || env.MEDIA_FOLDER_PATH || '').trim();
+  const resolvedRoot = assetRoot ? resolveAssetPath(assetRoot, baseDir) : '';
+  const explicitAssets = splitAssetList(env.IMAGE_ONLY_ASSETS)
+    .map((assetPath) => {
+      if (path.isAbsolute(assetPath)) return assetPath;
+      return resolveAssetPath(assetPath, resolvedRoot || baseDir);
+    });
+  if (explicitAssets.length) return explicitAssets;
+
+  if (!assetRoot) return [];
+  if (!(await pathExists(resolvedRoot))) {
+    throw new Error(`IMAGE_ONLY asset root does not exist: ${resolvedRoot}`);
+  }
+
+  return listFilesFromDir(resolvedRoot, IMAGE_EXTENSIONS);
+}
+
+export function getImageOnlyAssetBySequence(assets, sequence) {
+  return assets[sequence - 1] || '';
+}
+
 export function formatDryRunPlan(plan) {
   const lines = [
     '[DRY RUN] Meta Ads Automation plan',
@@ -369,8 +400,39 @@ export function formatDryRunPlan(plan) {
 export async function validateCampaignConfig(env = process.env, options = {}) {
   const mode = normalizeCampaignMode(env.CAMPAIGN_MODE);
   if (mode === CAMPAIGN_MODES.IMAGE_ONLY) {
-    readIntegerEnv(env, 'ADSET_COUNT', 1);
-    return { mode, plan: null };
+    const adsetDuplicateCount = readIntegerEnv(env, 'ADSET_COUNT', 1);
+    const adCreativeDuplicateCount = readIntegerEnv(env, 'AD_CREATIVE_COUNT', readIntegerEnv(env, 'ADSET_CREATIVE_COUNT', 5));
+    if (!isPerAdImageOnlyUploadMode(env)) return { mode, plan: null };
+
+    const imageAssets = await getImageOnlyAssets(env, options);
+    const effectiveAdsetCount = adsetDuplicateCount + 1;
+    const effectiveCreativeCount = adCreativeDuplicateCount + 1;
+    const requiredAssetCount = effectiveAdsetCount * effectiveCreativeCount;
+    if (imageAssets.length < requiredAssetCount) {
+      throw new Error(`IMAGE_ONLY_UPLOAD_MODE=PER_AD requires at least ${requiredAssetCount} image assets. Found ${imageAssets.length}.`);
+    }
+
+    for (const asset of imageAssets.slice(0, requiredAssetCount)) {
+      if (!IMAGE_EXTENSIONS.test(asset)) {
+        throw new Error(`Invalid IMAGE_ONLY asset: ${asset}. Allowed: png, jpg, jpeg, webp, gif.`);
+      }
+      if (!(await pathExists(asset))) {
+        throw new Error(`IMAGE_ONLY asset does not exist: ${asset}`);
+      }
+    }
+
+    return {
+      mode,
+      plan: {
+        mode,
+        campaignName: env.CAMPAIGN_NAME || '',
+        uploadMode: 'PER_AD',
+        adsetCount: effectiveAdsetCount,
+        creativeCount: effectiveCreativeCount,
+        totalAds: requiredAssetCount,
+        imageAssets: imageAssets.slice(0, requiredAssetCount),
+      },
+    };
   }
 
   const plan = await buildBlogMixedPlan(env, options);

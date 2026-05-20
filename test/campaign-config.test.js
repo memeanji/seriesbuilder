@@ -10,6 +10,8 @@ import {
   buildBlogMixedPlan,
   buildBlogVideoAdName,
   formatDryRunPlan,
+  getImageOnlyAssetBySequence,
+  getImageOnlyAssets,
   getLandingUrlForAdset,
   normalizeCampaignMode,
   validateCampaignConfig,
@@ -138,6 +140,32 @@ test('IMAGE_ONLY mode validation stays lightweight', async () => {
   assert.equal(result.mode, CAMPAIGN_MODES.IMAGE_ONLY);
   assert.equal(result.plan, null);
   assert.equal(normalizeCampaignMode(''), CAMPAIGN_MODES.IMAGE_ONLY);
+});
+
+test('IMAGE_ONLY PER_AD mode maps sorted image assets by ad sequence', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'image-only-plan-'));
+  const assetRoot = path.join(root, 'images');
+  await fs.mkdir(assetRoot, { recursive: true });
+  await fs.writeFile(path.join(assetRoot, 'image10.jpg'), '');
+  await fs.writeFile(path.join(assetRoot, 'image2.jpg'), '');
+  await fs.writeFile(path.join(assetRoot, 'image1.jpg'), '');
+  await fs.writeFile(path.join(assetRoot, 'image3.png'), '');
+
+  const env = {
+    CAMPAIGN_MODE: 'IMAGE_ONLY',
+    IMAGE_ONLY_UPLOAD_MODE: 'PER_AD',
+    ADSET_COUNT: '1',
+    AD_CREATIVE_COUNT: '1',
+    IMAGE_ONLY_ASSET_ROOT: './images',
+  };
+  const assets = await getImageOnlyAssets(env, { baseDir: root });
+  assert.deepEqual(assets.map((asset) => path.basename(asset)), ['image1.jpg', 'image2.jpg', 'image3.png', 'image10.jpg']);
+  assert.equal(path.basename(getImageOnlyAssetBySequence(assets, 2)), 'image2.jpg');
+
+  const result = await validateCampaignConfig(env, { baseDir: root });
+  assert.equal(result.mode, CAMPAIGN_MODES.IMAGE_ONLY);
+  assert.equal(result.plan.uploadMode, 'PER_AD');
+  assert.equal(result.plan.totalAds, 4);
 });
 
 test('dry-run plan lists image and video creatives without API calls', async () => {

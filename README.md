@@ -69,6 +69,8 @@ ADSET_DAILY_BUDGET=100000
 CDP_URL=http://127.0.0.1:9222
 SCHEDULE_TIME=05:00
 MEDIA_FOLDER_PATH=
+IMAGE_ONLY_UPLOAD_MODE=
+IMAGE_ONLY_ASSET_ROOT=
 ```
 
 ## IMAGE_ONLY 모드
@@ -79,6 +81,7 @@ MEDIA_FOLDER_PATH=
 - 광고명은 기존 `f_i_o_l_MMDD_XX` 규칙을 유지합니다.
 - 랜딩 URL도 기존 광고명 기반 URL 생성 방식을 유지합니다.
 - 기존 이미지 업로드/검색 흐름을 그대로 사용합니다.
+- 더 빠른 1개 광고당 1개 이미지 업로드를 쓰려면 `IMAGE_ONLY_UPLOAD_MODE=PER_AD`를 켭니다.
 
 예시:
 
@@ -89,6 +92,23 @@ ADSET_COUNT=9
 AD_CREATIVE_COUNT=4
 ADSET_DAILY_BUDGET=100000
 AD_FORMAT=image
+MEDIA_FOLDER_PATH=C:\Users\894플러스\Desktop\F_I_O_L_0520
+IMAGE_ONLY_UPLOAD_MODE=PER_AD
+IMAGE_ONLY_ASSET_ROOT=C:\Users\894플러스\Desktop\F_I_O_L_0520
+```
+
+`PER_AD` 모드에서는 폴더 안 이미지를 파일명 순서대로 정렬해서 광고 순번에 1:1로 매칭합니다.
+
+```text
+image ad sequence 1 -> 첫 번째 이미지 파일
+image ad sequence 2 -> 두 번째 이미지 파일
+image ad sequence 3 -> 세 번째 이미지 파일
+```
+
+명시 목록을 쓰고 싶으면 아래처럼 지정할 수도 있습니다.
+
+```env
+IMAGE_ONLY_ASSETS=image1.jpg,image2.jpg,image3.jpg,image4.jpg
 ```
 
 ## BLOG_MIXED 모드

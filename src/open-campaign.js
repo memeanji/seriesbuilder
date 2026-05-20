@@ -7,6 +7,9 @@ import {
   buildBlogAdsetName,
   formatDryRunPlan,
   getBlogAdPlanBySequence,
+  getImageOnlyAssetBySequence,
+  getImageOnlyAssets,
+  isPerAdImageOnlyUploadMode,
   normalizeCampaignMode,
   parseBoolean,
   validateCampaignConfig,
@@ -31,6 +34,7 @@ const QUICK_TEST_AD_NAME = process.env.QUICK_TEST_AD_NAME || getAdName(1);
 
 let firstCreativeMediaUploaded = false;
 let activeCampaignPlan = null;
+let imageOnlyPerAdAssets = [];
 
 const DIRS = {
   screenshots: path.resolve('screenshots'),
@@ -2611,6 +2615,17 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
             targetAdFormat,
             targetAssetPath,
           });
+        } else if (isPerAdImageOnlyUploadMode(process.env)) {
+          const imageAssetPath = getImageOnlyAssetBySequence(imageOnlyPerAdAssets, adCreativeIndex);
+          if (!imageAssetPath) {
+            throw new Error(`IMAGE_ONLY_UPLOAD_MODE=PER_AD image asset not found for ad sequence ${adCreativeIndex}.`);
+          }
+          await page.waitForTimeout(3000);
+          await attachMediaFromFolderIfConfigured(page, targetAdName, [imageAssetPath], 'image');
+          console.log('[STEP] IMAGE_ONLY PER_AD media upload completed:', {
+            targetAdName,
+            targetAssetPath: imageAssetPath,
+          });
         } else if (adCreativeIndex === 1 && !firstCreativeMediaUploaded) {
           await page.waitForTimeout(5000);
           await attachMediaFromFolderIfConfigured(page, targetAdName);
@@ -2660,7 +2675,16 @@ async function runCreativeStepOnly(page) {
   console.log('[STEP] QUICK_TEST_CREATIVE_STEP=true - 크리에이티브 단계만 실행');
   await openCreativeSettingsAndFillLandingUrl(page, QUICK_TEST_AD_NAME);
   if (!firstCreativeMediaUploaded) {
-    await attachMediaFromFolderIfConfigured(page, QUICK_TEST_AD_NAME);
+    if (isPerAdImageOnlyUploadMode(process.env)) {
+      if (!imageOnlyPerAdAssets.length) {
+        imageOnlyPerAdAssets = await getImageOnlyAssets(process.env, { baseDir: process.cwd() });
+      }
+      const imageAssetPath = getImageOnlyAssetBySequence(imageOnlyPerAdAssets, 1);
+      if (!imageAssetPath) throw new Error('IMAGE_ONLY_UPLOAD_MODE=PER_AD image asset not found for quick creative test.');
+      await attachMediaFromFolderIfConfigured(page, QUICK_TEST_AD_NAME, [imageAssetPath], 'image');
+    } else {
+      await attachMediaFromFolderIfConfigured(page, QUICK_TEST_AD_NAME);
+    }
     firstCreativeMediaUploaded = true;
   }
   await page.screenshot({ path: path.join(DIRS.screenshots, 'quick-creative-step-done.png'), fullPage: true });
@@ -2748,11 +2772,29 @@ async function main() {
   validateEnv();
   const validation = await validateCampaignConfig(process.env, { baseDir: process.cwd() });
   activeCampaignPlan = validation.plan;
+  if (validation.mode === CAMPAIGN_MODES.IMAGE_ONLY && activeCampaignPlan?.uploadMode === 'PER_AD') {
+    imageOnlyPerAdAssets = activeCampaignPlan.imageAssets || [];
+  }
   console.log('[CONFIG] campaign mode:', validation.mode);
+  if (imageOnlyPerAdAssets.length) {
+    console.log('[CONFIG] image-only upload mode: PER_AD');
+    console.log('[CONFIG] image-only per-ad asset count:', imageOnlyPerAdAssets.length);
+  }
 
   if (DRY_RUN) {
     if (validation.mode === CAMPAIGN_MODES.BLOG_MIXED) {
       console.log(formatDryRunPlan(activeCampaignPlan));
+    } else if (activeCampaignPlan?.uploadMode === 'PER_AD') {
+      console.log('[DRY RUN] Meta Ads Automation plan');
+      console.log(`campaign mode: ${validation.mode}`);
+      console.log(`campaign name: ${CAMPAIGN_NAME}`);
+      console.log('image upload mode: PER_AD');
+      console.log(`adset count: ${activeCampaignPlan.adsetCount}`);
+      console.log(`image ads per adset: ${activeCampaignPlan.creativeCount}`);
+      console.log(`total image ads: ${activeCampaignPlan.totalAds}`);
+      activeCampaignPlan.imageAssets.forEach((asset, index) => {
+        console.log(`- image ad sequence ${index + 1}: ${asset}`);
+      });
     } else {
       console.log('[DRY RUN] Meta Ads Automation plan');
       console.log(`campaign mode: ${validation.mode}`);
