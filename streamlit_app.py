@@ -442,7 +442,15 @@ with left:
     campaign_name = st.text_input("Campaign name", value=env.get("CAMPAIGN_NAME", ""))
 
 with right:
-    adset_count = st.number_input("Adset count", min_value=0, max_value=100, value=int(env.get("ADSET_COUNT", "3") or "3"))
+    adset_count_min = 1 if campaign_mode == "BLOG_MIXED" else 0
+    adset_count_default = max(adset_count_min, int(env.get("ADSET_COUNT", "3") or "3"))
+    adset_count_label = "Adset count (BLOG_MIXED actual adsets)" if campaign_mode == "BLOG_MIXED" else "Adset count"
+    adset_count = st.number_input(
+        adset_count_label,
+        min_value=adset_count_min,
+        max_value=100,
+        value=adset_count_default,
+    )
     daily_budget = st.text_input("Daily budget", value=env.get("ADSET_DAILY_BUDGET", "300000"))
     schedule_time = st.text_input("Schedule time", value=env.get("SCHEDULE_TIME", "05:00"))
     cdp_url = st.text_input("CDP URL", value=env.get("CDP_URL", "http://127.0.0.1:9222"))
