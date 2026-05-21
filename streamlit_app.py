@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 import re
@@ -13,6 +13,21 @@ APP_DIR = Path(__file__).resolve().parent
 ENV_PATH = APP_DIR / ".env"
 ADS_MANAGER_URL = "https://adsmanager.facebook.com/adsmanager/manage/campaigns"
 DEFAULT_ACCOUNT_ID = "1838892106940197"
+NOTIFICATION_DEFAULTS = {
+    "ENABLE_DESKTOP_ALERT": "true",
+    "NOTIFY_ON_SUCCESS": "true",
+    "NOTIFY_ON_ERROR": "true",
+    "NOTIFY_ON_STOP": "true",
+    "NOTIFY_ON_VIDEO_UPLOAD_TIMEOUT": "true",
+    "NOTIFICATION_APP_NAME": "Meta Ads Automation",
+    "NOTIFICATION_SUCCESS_TITLE": "작업 완료",
+    "NOTIFICATION_ERROR_TITLE": "작업 중단",
+    "NOTIFICATION_TIMEOUT_TITLE": "업로드 지연",
+}
+
+
+def env_bool(values: dict[str, str], key: str, default: str = "false") -> bool:
+    return values.get(key, default).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def read_env(path: Path = ENV_PATH) -> dict[str, str]:
@@ -43,6 +58,16 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
         f"ADSET_DAILY_BUDGET={values.get('ADSET_DAILY_BUDGET', '100000')}",
         f"CDP_URL={values.get('CDP_URL', 'http://127.0.0.1:9222')}",
         f"SCHEDULE_TIME={values.get('SCHEDULE_TIME', '05:00')}",
+        "",
+        f"ENABLE_DESKTOP_ALERT={values.get('ENABLE_DESKTOP_ALERT', NOTIFICATION_DEFAULTS['ENABLE_DESKTOP_ALERT'])}",
+        f"NOTIFY_ON_SUCCESS={values.get('NOTIFY_ON_SUCCESS', NOTIFICATION_DEFAULTS['NOTIFY_ON_SUCCESS'])}",
+        f"NOTIFY_ON_ERROR={values.get('NOTIFY_ON_ERROR', NOTIFICATION_DEFAULTS['NOTIFY_ON_ERROR'])}",
+        f"NOTIFY_ON_STOP={values.get('NOTIFY_ON_STOP', NOTIFICATION_DEFAULTS['NOTIFY_ON_STOP'])}",
+        f"NOTIFY_ON_VIDEO_UPLOAD_TIMEOUT={values.get('NOTIFY_ON_VIDEO_UPLOAD_TIMEOUT', NOTIFICATION_DEFAULTS['NOTIFY_ON_VIDEO_UPLOAD_TIMEOUT'])}",
+        f"NOTIFICATION_APP_NAME={values.get('NOTIFICATION_APP_NAME', NOTIFICATION_DEFAULTS['NOTIFICATION_APP_NAME'])}",
+        f"NOTIFICATION_SUCCESS_TITLE={values.get('NOTIFICATION_SUCCESS_TITLE', NOTIFICATION_DEFAULTS['NOTIFICATION_SUCCESS_TITLE'])}",
+        f"NOTIFICATION_ERROR_TITLE={values.get('NOTIFICATION_ERROR_TITLE', NOTIFICATION_DEFAULTS['NOTIFICATION_ERROR_TITLE'])}",
+        f"NOTIFICATION_TIMEOUT_TITLE={values.get('NOTIFICATION_TIMEOUT_TITLE', NOTIFICATION_DEFAULTS['NOTIFICATION_TIMEOUT_TITLE'])}",
         "",
     ]
 
@@ -76,6 +101,32 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
                 "",
             ]
         )
+    elif mode == "VIDEO_ONLY_CBO":
+        lines.extend(
+            [
+                f"AD_CREATIVE_COUNT={values.get('AD_CREATIVE_COUNT', '0')}",
+                "AD_FORMAT=video",
+                "VIDEO_ONLY_CBO_AD_NAME_PREFIX=f_v_b_o_l",
+                "DATE_FORMAT=MMDD",
+                f"CAMPAIGN_BUDGET={values.get('CAMPAIGN_BUDGET', '')}",
+                f"VIDEO_ONLY_CBO_VIDEO_FOLDER={values.get('VIDEO_ONLY_CBO_VIDEO_FOLDER', '')}",
+                "VIDEO_ONLY_CBO_AUTO_LANDING_URL=false",
+                "",
+            ]
+        )
+        adset_count = int(values.get("ADSET_COUNT", "0") or "0") + 1
+        creative_count = int(values.get("AD_CREATIVE_COUNT", "0") or "0") + 1
+        for index in range(1, adset_count * creative_count + 1):
+            key = f"VIDEO_ONLY_CBO_LANDING_URL_{index}"
+            lines.append(f"{key}={values.get(key, '')}")
+        lines.append("")
+        for index in range(1, adset_count + 1):
+            key = f"VIDEO_ONLY_CBO_ADSET_NAME_{index}"
+            lines.append(f"{key}={values.get(key, '')}")
+        for index in range(1, adset_count * creative_count + 1):
+            key = f"VIDEO_ONLY_CBO_AD_NAME_{index}"
+            lines.append(f"{key}={values.get(key, '')}")
+        lines.append("")
     else:
         lines.extend(
             [
@@ -149,7 +200,7 @@ def expected_blog_folder_name(adset_index: int, budget: str, schedule_time: str)
     mmdd = datetime.now().strftime("%m%d")
     budget_manwon = int(int(budget or "0") / 10000)
     hour = schedule_time.split(":", 1)[0].zfill(2)
-    return f"{mmdd} {adset_index}번 광고세트-일예산 {budget_manwon}만원-이미지 4개 + 영상 1개-익일 {hour}시"
+    return f"{mmdd} {adset_index}번 광고세트-일예산 {budget_manwon}만원-이미지 4개 + 영상 1개 익일 {hour}시"
 
 
 def expected_image_folder_name(adset_index: int, budget: str, creative_count: int, schedule_time: str) -> str:
@@ -166,6 +217,49 @@ def expected_video_folder_name() -> str:
 def expected_video_child_folder_name() -> str:
     mmdd = datetime.now().strftime("%m%d")
     return f"{mmdd} 올레놀샷 CBO 캠페인-1"
+
+
+def format_budget_preview(value: str) -> str:
+    raw = str(value or "").replace(",", "").strip()
+    if not raw.isdigit() or int(raw) <= 0:
+        return ""
+    return f"{int(raw):,}"
+
+
+def build_video_only_cbo_ad_name(index: int) -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    return f"f_v_b_o_l_{mmdd}_{index}"
+
+
+def build_video_only_cbo_adset_name(index: int) -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    return f"{mmdd} CBO 광고세트 -{index}"
+
+
+def default_landing_url(ad_name: str) -> str:
+    return f"https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign={ad_name}"
+
+
+def find_video_file_for_preview(ad_name: str, folder: str) -> tuple[str, list[str]]:
+    expected = [f"{ad_name}.mp4", f"{ad_name}.mov", f"{ad_name}.m4v"]
+    folder_path = Path(folder).expanduser()
+    for filename in expected:
+        candidate = folder_path / filename
+        if candidate.exists():
+            return str(candidate), expected
+    return "", expected
+
+
+def list_video_stems_for_preview(folder: str) -> list[str]:
+    folder_path = Path(folder).expanduser()
+    if not folder_path.exists() or not folder_path.is_dir():
+        return []
+    files = [
+        item
+        for item in folder_path.iterdir()
+        if item.is_file() and item.suffix.lower() in [".mp4", ".mov", ".m4v"]
+    ]
+    return [item.stem for item in sorted(files, key=lambda item: item.name.lower())]
 
 
 def read_child_folder_names(root: str, limit: int) -> list[str]:
@@ -210,6 +304,29 @@ def validate_form(values: dict[str, str]) -> list[str]:
     elif values.get("CAMPAIGN_MODE") == "VIDEO_ONLY":
         if not values.get("VIDEO_ONLY_ASSET_ROOT", "").strip():
             errors.append("VIDEO_ONLY_ASSET_ROOT is required for VIDEO_ONLY.")
+    elif values.get("CAMPAIGN_MODE") == "VIDEO_ONLY_CBO":
+        budget_preview = format_budget_preview(values.get("CAMPAIGN_BUDGET", ""))
+        if not budget_preview:
+            errors.append("Campaign budget must be a positive integer for VIDEO_ONLY_CBO.")
+        video_folder = values.get("VIDEO_ONLY_CBO_VIDEO_FOLDER", "").strip()
+        if not video_folder:
+            errors.append("Video folder is required for VIDEO_ONLY_CBO.")
+        elif not Path(video_folder).expanduser().exists():
+            errors.append(f"Video folder does not exist: {video_folder}")
+
+        adset_total = int(values.get("ADSET_COUNT", "0") or "0") + 1
+        creative_total = int(values.get("AD_CREATIVE_COUNT", "0") or "0") + 1
+        names: list[str] = []
+        for index in range(1, adset_total * creative_total + 1):
+            ad_name = values.get(f"VIDEO_ONLY_CBO_AD_NAME_{index}", "").strip() or build_video_only_cbo_ad_name(index)
+            if ad_name in names:
+                errors.append(f"Duplicate ad name: {ad_name}")
+            names.append(ad_name)
+            video_file, expected = find_video_file_for_preview(ad_name, video_folder)
+            if not video_file:
+                errors.append(f"Video file not found for ad name: {ad_name}. Expected one of: {', '.join(expected)}")
+            if not values.get(f"VIDEO_ONLY_CBO_LANDING_URL_{index}", "").strip():
+                errors.append(f"VIDEO_ONLY_CBO_LANDING_URL_{index} is required.")
     return errors
 
 
@@ -225,7 +342,7 @@ def show_command_result(title: str, command: list[str], code: int, output: str) 
 
 
 st.set_page_config(page_title="Meta Ads Automation", layout="wide")
-st.title("Meta Ads Automation MVP")
+st.title("Meta Ads Automation")
 
 env = read_env()
 
@@ -257,15 +374,53 @@ with st.sidebar:
         start_powershell("npm run open-campaign")
         st.info("Automation PowerShell opened.")
 
+    st.subheader("Notifications")
+    enable_desktop_alert = st.toggle(
+        "데스크톱 알림 사용",
+        value=env_bool(env, "ENABLE_DESKTOP_ALERT", NOTIFICATION_DEFAULTS["ENABLE_DESKTOP_ALERT"]),
+    )
+    notify_on_success = st.toggle(
+        "작업 완료 시 알림",
+        value=env_bool(env, "NOTIFY_ON_SUCCESS", NOTIFICATION_DEFAULTS["NOTIFY_ON_SUCCESS"]),
+    )
+    notify_on_error = st.toggle(
+        "에러 발생 시 알림",
+        value=env_bool(env, "NOTIFY_ON_ERROR", NOTIFICATION_DEFAULTS["NOTIFY_ON_ERROR"]),
+    )
+    notify_on_stop = st.toggle(
+        "검증/중단 시 알림",
+        value=env_bool(env, "NOTIFY_ON_STOP", NOTIFICATION_DEFAULTS["NOTIFY_ON_STOP"]),
+    )
+    notify_on_video_upload_timeout = st.toggle(
+        "영상 업로드 타임아웃 알림",
+        value=env_bool(env, "NOTIFY_ON_VIDEO_UPLOAD_TIMEOUT", NOTIFICATION_DEFAULTS["NOTIFY_ON_VIDEO_UPLOAD_TIMEOUT"]),
+    )
+
+    st.divider()
+    st.markdown(
+        """
+        <div style="font-size:0.82rem; line-height:1.45; color:rgba(49,51,63,0.70);">
+          <div style="margin-bottom:7px;">Meta Ads Automation</div>
+          <a href="https://repurely.com/" target="_blank" style="display:block; margin-bottom:7px; color:inherit; text-decoration:none;">https://repurely.com</a>
+          <div>@memenaji</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 st.subheader("Campaign Settings")
 
 left, right = st.columns(2)
 with left:
+    campaign_mode_options = ["BLOG_MIXED", "IMAGE_ONLY", "VIDEO_ONLY_CBO"]
+    current_campaign_mode = env.get("CAMPAIGN_MODE", "IMAGE_ONLY")
+    if current_campaign_mode not in campaign_mode_options:
+        current_campaign_mode = "IMAGE_ONLY"
     campaign_mode = st.selectbox(
         "Campaign mode",
-        ["BLOG_MIXED", "IMAGE_ONLY", "VIDEO_ONLY"],
-        index=["BLOG_MIXED", "IMAGE_ONLY", "VIDEO_ONLY"].index(env.get("CAMPAIGN_MODE", "IMAGE_ONLY")) if env.get("CAMPAIGN_MODE", "IMAGE_ONLY") in ["BLOG_MIXED", "IMAGE_ONLY", "VIDEO_ONLY"] else 1,
+        campaign_mode_options,
+        index=campaign_mode_options.index(current_campaign_mode),
     )
     dry_run = st.toggle("DRY_RUN", value=env.get("DRY_RUN", "true").lower() == "true")
     ad_account_id = st.text_input("Ad account ID", value=env.get("AD_ACCOUNT_ID", DEFAULT_ACCOUNT_ID))
@@ -287,7 +442,24 @@ next_env: dict[str, str] = {
     "ADSET_DAILY_BUDGET": daily_budget,
     "CDP_URL": cdp_url,
     "SCHEDULE_TIME": schedule_time,
+    "ENABLE_DESKTOP_ALERT": str(enable_desktop_alert).lower(),
+    "NOTIFY_ON_SUCCESS": str(notify_on_success).lower(),
+    "NOTIFY_ON_ERROR": str(notify_on_error).lower(),
+    "NOTIFY_ON_STOP": str(notify_on_stop).lower(),
+    "NOTIFY_ON_VIDEO_UPLOAD_TIMEOUT": str(notify_on_video_upload_timeout).lower(),
+    "NOTIFICATION_APP_NAME": env.get("NOTIFICATION_APP_NAME", NOTIFICATION_DEFAULTS["NOTIFICATION_APP_NAME"]),
+    "NOTIFICATION_SUCCESS_TITLE": env.get("NOTIFICATION_SUCCESS_TITLE", NOTIFICATION_DEFAULTS["NOTIFICATION_SUCCESS_TITLE"]),
+    "NOTIFICATION_ERROR_TITLE": env.get("NOTIFICATION_ERROR_TITLE", NOTIFICATION_DEFAULTS["NOTIFICATION_ERROR_TITLE"]),
+    "NOTIFICATION_TIMEOUT_TITLE": env.get("NOTIFICATION_TIMEOUT_TITLE", NOTIFICATION_DEFAULTS["NOTIFICATION_TIMEOUT_TITLE"]),
 }
+
+with st.expander("Notification preview", expanded=False):
+    st.write("알림 설정:")
+    st.write(f"- 데스크톱 알림: {'ON' if enable_desktop_alert else 'OFF'}")
+    st.write(f"- 완료 알림: {'ON' if notify_on_success else 'OFF'}")
+    st.write(f"- 에러 알림: {'ON' if notify_on_error else 'OFF'}")
+    st.write(f"- 검증/중단 알림: {'ON' if notify_on_stop else 'OFF'}")
+    st.write(f"- 영상 업로드 타임아웃 알림: {'ON' if notify_on_video_upload_timeout else 'OFF'}")
 
 if campaign_mode == "BLOG_MIXED":
     st.subheader("BLOG_MIXED")
@@ -303,6 +475,66 @@ if campaign_mode == "BLOG_MIXED":
     for index in range(1, int(adset_count) + 1):
         key = f"BLOG_LANDING_URL_{index}"
         next_env[key] = st.text_input(f"Adset {index} landing URL", value=env.get(key, ""))
+elif campaign_mode == "VIDEO_ONLY_CBO":
+    st.subheader("VIDEO_ONLY_CBO")
+    st.caption("Video-only CBO campaign creation mode.")
+    campaign_budget = st.text_input("Campaign budget", value=env.get("CAMPAIGN_BUDGET", "25000"))
+    actual_adset_count = st.number_input("Adset count for this CBO campaign", min_value=1, max_value=100, value=int(env.get("ADSET_COUNT", "0") or "0") + 1)
+    video_count = st.number_input("Video ads per adset", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "0") or "0") + 1)
+    video_folder = st.text_input("Video file folder", value=env.get("VIDEO_ONLY_CBO_VIDEO_FOLDER", "./assets/videos"))
+    next_env["CAMPAIGN_BUDGET"] = campaign_budget
+    next_env["ADSET_COUNT"] = str(int(actual_adset_count) - 1)
+    next_env["AD_CREATIVE_COUNT"] = str(int(video_count) - 1)
+    next_env["VIDEO_ONLY_CBO_VIDEO_FOLDER"] = video_folder
+
+    adset_total = int(actual_adset_count)
+    creative_total = int(video_count)
+    total_ads = adset_total * creative_total
+    video_stems = list_video_stems_for_preview(video_folder)
+    st.info(f"Budget preview for Meta: {format_budget_preview(campaign_budget) or 'invalid budget'}")
+
+    preview_rows = []
+    missing_count = 0
+    st.subheader("Adset names")
+    adset_names: dict[int, str] = {}
+    for adset_index in range(1, adset_total + 1):
+        key = f"VIDEO_ONLY_CBO_ADSET_NAME_{adset_index}"
+        adset_name = st.text_input(f"Adset {adset_index} name", value=env.get(key, build_video_only_cbo_adset_name(adset_index)), key=key)
+        next_env[key] = adset_name
+        adset_names[adset_index] = adset_name
+
+    st.subheader("Ads, videos, and landing URLs")
+    for ad_index in range(1, total_ads + 1):
+        adset_index = ((ad_index - 1) // creative_total) + 1
+        ad_name_key = f"VIDEO_ONLY_CBO_AD_NAME_{ad_index}"
+        default_ad_name = env.get(ad_name_key) or (video_stems[ad_index - 1] if ad_index <= len(video_stems) else build_video_only_cbo_ad_name(ad_index))
+        ad_name = st.text_input(f"Ad {ad_index} name", value=default_ad_name, key=ad_name_key)
+        next_env[ad_name_key] = ad_name
+        video_file, expected = find_video_file_for_preview(ad_name, video_folder)
+        landing_key = f"VIDEO_ONLY_CBO_LANDING_URL_{ad_index}"
+        default_url = env.get(landing_key, default_landing_url(ad_name))
+        landing_url = st.text_input(f"{ad_name} landing URL", value=default_url, key=landing_key)
+        next_env[landing_key] = landing_url
+        if not video_file or not landing_url.strip():
+            missing_count += 1
+        preview_rows.append(
+            {
+                "adset": adset_names[adset_index],
+                "ad_name": ad_name,
+                "video_file": video_file or f"Missing: {', '.join(expected)}",
+                "landing_url": landing_url,
+            }
+        )
+
+    with st.expander("VIDEO_ONLY_CBO preview / validation", expanded=True):
+        st.write(f"Campaign name: `{campaign_name or '(missing)'}`")
+        st.write(f"Campaign budget: `{format_budget_preview(campaign_budget) or '(invalid)'}`")
+        st.write(f"Video folder: `{video_folder}`")
+        st.dataframe(preview_rows, use_container_width=True)
+        if missing_count:
+            st.error(f"{missing_count} ad rows have a missing video file or landing URL.")
+        else:
+            st.success("All video files and landing URLs are ready.")
 elif campaign_mode == "VIDEO_ONLY":
     st.subheader("VIDEO_ONLY")
     st.caption("Video-only direct landing mode.")
@@ -313,7 +545,7 @@ elif campaign_mode == "VIDEO_ONLY":
 
     with st.expander("Expected folder names", expanded=True):
         detected_folder_names = read_child_folder_names(str(Path(video_root).parent), 1)
-        matched = [name for name in detected_folder_names if "올레놀샷" in name and "틱톡세팅" in name]
+        matched = detected_folder_names
         if matched:
             st.caption("Detected from parent folder.")
             st.write(f"1. `{matched[0]}`")
@@ -360,6 +592,7 @@ with col1:
     if st.button("Save .env", type="primary"):
         saved = write_env(next_env)
         st.success(f"Saved: {ENV_PATH}")
+        st.toast("알림 설정을 포함해 .env 저장 완료")
         st.code(saved, language="dotenv")
 
 with col2:
@@ -371,12 +604,17 @@ with col2:
         st.code(saved, language="dotenv")
         if errors:
             st.error("Fix these fields before dry-run:")
+            st.toast("작업 중단: 입력값 검증 실패")
             for error in errors:
                 st.write(f"- {error}")
         else:
             command = ["node", "src/open-campaign.js"]
             code, output = run_command(command, timeout=300)
             show_command_result("dry-run", command, code, output)
+            if code == 0:
+                st.toast("Meta 광고 자동화 dry-run 완료")
+            else:
+                st.toast("작업 중단: 자세한 내용은 로그를 확인하세요")
 
 with col3:
     if st.button("Run real automation terminal"):
@@ -387,11 +625,13 @@ with col3:
         st.code(saved, language="dotenv")
         if errors:
             st.error("Fix these fields before real run:")
+            st.toast("작업 중단: 입력값 검증 실패")
             for error in errors:
                 st.write(f"- {error}")
         else:
             start_powershell("npm run open-campaign")
             st.warning("DRY_RUN=false saved. Automation terminal opened.")
+            st.toast("자동화 터미널을 열었습니다. 완료/에러 알림은 실제 실행 결과에 따라 표시됩니다")
 
 with st.expander("Current .env", expanded=False):
     if ENV_PATH.exists():

@@ -5,10 +5,12 @@ export const CAMPAIGN_MODES = {
   IMAGE_ONLY: 'IMAGE_ONLY',
   BLOG_MIXED: 'BLOG_MIXED',
   VIDEO_ONLY: 'VIDEO_ONLY',
+  VIDEO_ONLY_CBO: 'VIDEO_ONLY_CBO',
 };
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|gif)$/i;
 const VIDEO_EXTENSIONS = /\.(mp4|mov|m4v|webm)$/i;
+const VIDEO_ONLY_CBO_EXTENSIONS = ['.mp4', '.mov', '.m4v'];
 
 export function parseBoolean(value) {
   return ['1', 'true', 'yes', 'y', 'on'].includes(String(value || '').trim().toLowerCase());
@@ -21,6 +23,9 @@ export function normalizeCampaignMode(value) {
   }
   if (['VIDEO', 'VIDEO_ONLY', 'VIDEO_CAMPAIGN', 'VIDEO_ONLY_CAMPAIGN'].includes(normalized)) {
     return CAMPAIGN_MODES.VIDEO_ONLY;
+  }
+  if (['VIDEO_ONLY_CBO', 'VIDEO_ONLY_CBO_CAMPAIGN', 'VIDEO_CBO', 'CBO_VIDEO_ONLY'].includes(normalized)) {
+    return CAMPAIGN_MODES.VIDEO_ONLY_CBO;
   }
   return CAMPAIGN_MODES.IMAGE_ONLY;
 }
@@ -97,6 +102,30 @@ export function buildVideoOnlyAdName(adIndex, env = process.env, date = new Date
   return `${prefix}_${today}_${adIndex}`;
 }
 
+export function buildVideoOnlyCboAdName(adIndex, env = process.env, date = new Date()) {
+  const explicitName = String(env[`VIDEO_ONLY_CBO_AD_NAME_${adIndex}`] || env[`AD_NAME_${adIndex}`] || '').trim();
+  if (explicitName) return explicitName;
+  const prefix = env.VIDEO_ONLY_CBO_AD_NAME_PREFIX || 'f_v_b_o_l';
+  const today = String(env.VIDEO_ONLY_CBO_AD_DATE || env.AD_NAME_DATE_OVERRIDE || '').trim() || getTodayString({
+    date,
+    timezone: env.TIMEZONE || 'Asia/Seoul',
+    dateFormat: env.DATE_FORMAT || 'MMDD',
+  });
+  return `${prefix}_${today}_${adIndex}`;
+}
+
+export function buildVideoOnlyCboAdsetName(adsetIndex, env = process.env, date = new Date()) {
+  const explicitName = String(env[`VIDEO_ONLY_CBO_ADSET_NAME_${adsetIndex}`] || env[`ADSET_NAME_${adsetIndex}`] || '').trim();
+  if (explicitName) return explicitName;
+  const today = getTodayString({
+    date,
+    timezone: env.TIMEZONE || 'Asia/Seoul',
+    dateFormat: env.DATE_FORMAT || 'MMDD',
+  });
+  const prefix = env.VIDEO_ONLY_CBO_ADSET_NAME_PREFIX || `${today} CBO 광고세트`;
+  return `${prefix} -${adsetIndex}`;
+}
+
 export function buildVideoOnlyAdsetName(adsetIndex, env = process.env, date = new Date()) {
   const today = getTodayString({
     date,
@@ -109,6 +138,18 @@ export function buildVideoOnlyAdsetName(adsetIndex, env = process.env, date = ne
 
 export function getVideoOnlyLandingUrl(adName) {
   return `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${adName}`;
+}
+
+export function getVideoOnlyCboLandingUrl(adIndex, adName, env = process.env) {
+  const value = String(
+    env[`VIDEO_ONLY_CBO_LANDING_URL_${adIndex}`] ||
+    env[`VIDEO_ONLY_CBO_AD_LANDING_URL_${adIndex}`] ||
+    env[`LANDING_URL_${adIndex}`] ||
+    ''
+  ).trim();
+  if (value) return value;
+  if (parseBoolean(env.VIDEO_ONLY_CBO_AUTO_LANDING_URL)) return getVideoOnlyLandingUrl(adName);
+  throw new Error(`Missing VIDEO_ONLY_CBO_LANDING_URL_${adIndex}. VIDEO_ONLY_CBO requires one landing URL per ad.`);
 }
 
 export function getLandingUrlForAdset(adsetIndex, env = process.env) {
@@ -145,6 +186,43 @@ function normalizeAssetStem(value) {
 
 function resolveAssetPath(assetPath, baseDir = process.cwd()) {
   return path.isAbsolute(assetPath) ? assetPath : path.resolve(baseDir, assetPath);
+}
+
+export function formatBudgetForMetaInput(value) {
+  const raw = String(value ?? '').replace(/,/g, '').trim();
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`CAMPAIGN_BUDGET must be a positive integer. Received: ${value}`);
+  }
+  const numeric = Number(raw);
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) {
+    throw new Error(`CAMPAIGN_BUDGET must be greater than 0. Received: ${value}`);
+  }
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(numeric);
+}
+
+export function validateCampaignName(value) {
+  const campaignName = String(value || '').trim();
+  if (!campaignName) throw new Error('CAMPAIGN_NAME is required for VIDEO_ONLY_CBO.');
+  return campaignName;
+}
+
+export async function findVideoFileByAdName(adName, videoFolder, options = {}) {
+  const baseDir = options.baseDir || process.cwd();
+  const folder = resolveAssetPath(String(videoFolder || '').trim(), baseDir);
+  if (!String(videoFolder || '').trim()) {
+    throw new Error('VIDEO_ONLY_CBO_VIDEO_FOLDER is required.');
+  }
+  if (!(await pathExists(folder))) {
+    throw new Error(`VIDEO_ONLY_CBO video folder does not exist: ${folder}`);
+  }
+
+  const expected = VIDEO_ONLY_CBO_EXTENSIONS.map((ext) => `${adName}${ext}`);
+  for (const filename of expected) {
+    const candidate = path.join(folder, filename);
+    if (await pathExists(candidate)) return candidate;
+  }
+
+  throw new Error(`Video file not found for ad name: ${adName}. Expected one of: ${expected.join(', ')}`);
 }
 
 async function listFilesFromDir(dir, extensionPattern) {
@@ -648,6 +726,80 @@ export async function buildVideoOnlyPlan(env = process.env, options = {}) {
   };
 }
 
+export async function buildVideoOnlyCboPlan(env = process.env, options = {}) {
+  const date = options.date || new Date();
+  const campaignName = validateCampaignName(env.CAMPAIGN_NAME);
+  const campaignBudget = formatBudgetForMetaInput(env.CAMPAIGN_BUDGET || env.VIDEO_ONLY_CBO_CAMPAIGN_BUDGET || '');
+  const videoFolder = env.VIDEO_ONLY_CBO_VIDEO_FOLDER || env.VIDEO_ONLY_ASSET_ROOT || env.MEDIA_FOLDER_PATH || '';
+  const adsetDuplicateCount = readIntegerEnv(env, 'ADSET_COUNT', 0);
+  const adCreativeDuplicateCount = readIntegerEnv(env, 'AD_CREATIVE_COUNT', readIntegerEnv(env, 'VIDEO_AD_COUNT', readIntegerEnv(env, 'ADSET_CREATIVE_COUNT', 0)));
+  const effectiveAdsetCount = adsetDuplicateCount + 1;
+  const effectiveCreativeCount = adCreativeDuplicateCount + 1;
+  const requiredAssetCount = effectiveAdsetCount * effectiveCreativeCount;
+  const seenNames = new Set();
+  const seenAssets = new Set();
+  const adsets = [];
+  const videoAssets = [];
+
+  for (let adsetIndex = 1; adsetIndex <= effectiveAdsetCount; adsetIndex += 1) {
+    const adsetName = buildVideoOnlyCboAdsetName(adsetIndex, env, date);
+    const ads = [];
+    const adIndexBase = (adsetIndex - 1) * effectiveCreativeCount;
+    for (let videoIndex = 1; videoIndex <= effectiveCreativeCount; videoIndex += 1) {
+      const globalAdIndex = adIndexBase + videoIndex;
+      const adName = buildVideoOnlyCboAdName(globalAdIndex, env, date);
+      if (seenNames.has(adName)) throw new Error(`Duplicate VIDEO_ONLY_CBO ad name: ${adName}`);
+      seenNames.add(adName);
+
+      const assetPath = await findVideoFileByAdName(adName, videoFolder, options);
+      if (seenAssets.has(assetPath)) throw new Error(`Duplicate VIDEO_ONLY_CBO video asset path: ${assetPath}`);
+      seenAssets.add(assetPath);
+      videoAssets.push(assetPath);
+
+      const landingUrl = getVideoOnlyCboLandingUrl(globalAdIndex, adName, env);
+      if (!landingUrl) throw new Error(`Missing landing URL for ad name: ${adName}`);
+      ads.push({
+        type: 'video',
+        index: globalAdIndex,
+        adsetLocalIndex: videoIndex,
+        name: adName,
+        assetPath,
+        landingUrl,
+        creativePayload: buildVideoCreativePayload({
+          videoAsset: assetPath,
+          thumbnailAsset: env.VIDEO_ONLY_CBO_THUMBNAIL || '',
+          landingUrl,
+        }),
+      });
+    }
+
+    adsets.push({
+      index: adsetIndex,
+      name: adsetName,
+      landingUrl: ads[0]?.landingUrl || '',
+      ads,
+    });
+  }
+
+  if (videoAssets.length !== requiredAssetCount) {
+    throw new Error(`VIDEO_ONLY_CBO requires exactly ${requiredAssetCount} video files. Found ${videoAssets.length}.`);
+  }
+
+  return {
+    mode: CAMPAIGN_MODES.VIDEO_ONLY_CBO,
+    campaignName,
+    campaignBudget,
+    rawCampaignBudget: String(env.CAMPAIGN_BUDGET || env.VIDEO_ONLY_CBO_CAMPAIGN_BUDGET || '').trim(),
+    videoFolder: resolveAssetPath(videoFolder, options.baseDir || process.cwd()),
+    adsetCount: effectiveAdsetCount,
+    videoAdsPerAdset: effectiveCreativeCount,
+    totalAdsPerAdset: effectiveCreativeCount,
+    totalAds: requiredAssetCount,
+    videoAssets,
+    adsets,
+  };
+}
+
 export function getVideoOnlyAdPlanBySequence(plan, sequence) {
   const zeroBased = sequence - 1;
   const adsetOffset = Math.floor(zeroBased / plan.totalAdsPerAdset);
@@ -663,11 +815,17 @@ export function getVideoOnlyAdPlanBySequence(plan, sequence) {
   };
 }
 
+export function getVideoOnlyCboAdPlanBySequence(plan, sequence) {
+  return getVideoOnlyAdPlanBySequence(plan, sequence);
+}
+
 export function formatDryRunPlan(plan) {
   const lines = [
     '[DRY RUN] Meta Ads Automation plan',
     `campaign mode: ${plan.mode}`,
     `campaign name: ${plan.campaignName}`,
+    ...(plan.campaignBudget ? [`campaign budget: ${plan.campaignBudget}`] : []),
+    ...(plan.videoFolder ? [`video folder: ${plan.videoFolder}`] : []),
     `adset count: ${plan.adsetCount}`,
   ];
 
@@ -723,6 +881,11 @@ export async function validateCampaignConfig(env = process.env, options = {}) {
 
   if (mode === CAMPAIGN_MODES.VIDEO_ONLY) {
     const plan = await buildVideoOnlyPlan(env, options);
+    return { mode, plan };
+  }
+
+  if (mode === CAMPAIGN_MODES.VIDEO_ONLY_CBO) {
+    const plan = await buildVideoOnlyCboPlan(env, options);
     return { mode, plan };
   }
 

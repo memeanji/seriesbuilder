@@ -11,7 +11,10 @@ import {
   buildBlogVideoAdName,
   buildVideoOnlyAdName,
   buildVideoOnlyAdsetName,
+  buildVideoOnlyCboPlan,
   buildVideoOnlyPlan,
+  findVideoFileByAdName,
+  formatBudgetForMetaInput,
   formatDryRunPlan,
   getImageOnlyAssetBySequence,
   getImageOnlyAssets,
@@ -428,4 +431,107 @@ test('VIDEO_ONLY allows ADSET_COUNT=0 as one actual adset', async () => {
   assert.equal(plan.adsetCount, 1);
   assert.equal(plan.totalAds, 2);
   assert.deepEqual(plan.adsets[0].ads.map((ad) => ad.name), ['f_v_o_l_0520_1', 'f_v_o_l_0520_2']);
+});
+
+test('VIDEO_ONLY_CBO validates campaign name and formats campaign budget', async () => {
+  assert.equal(normalizeCampaignMode('VIDEO_ONLY_CBO_CAMPAIGN'), CAMPAIGN_MODES.VIDEO_ONLY_CBO);
+  assert.equal(formatBudgetForMetaInput('25000'), '25,000');
+  assert.equal(formatBudgetForMetaInput('25,000'), '25,000');
+  await assert.rejects(
+    () => buildVideoOnlyCboPlan({
+      CAMPAIGN_MODE: 'VIDEO_ONLY_CBO',
+      CAMPAIGN_BUDGET: '25000',
+      VIDEO_ONLY_CBO_VIDEO_FOLDER: './videos',
+    }),
+    /CAMPAIGN_NAME is required/,
+  );
+  assert.throws(() => formatBudgetForMetaInput('0'), /greater than 0/);
+});
+
+test('VIDEO_ONLY_CBO matches exact video filename by ad name and supported extension order', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'video-cbo-match-'));
+  const folder = path.join(root, 'videos');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(path.join(folder, 'f_v_b_o_l_0520_1.mov'), '');
+  await fs.writeFile(path.join(folder, 'f_v_b_o_l_0520_2.m4v'), '');
+
+  assert.equal(path.basename(await findVideoFileByAdName('f_v_b_o_l_0520_1', './videos', { baseDir: root })), 'f_v_b_o_l_0520_1.mov');
+  assert.equal(path.basename(await findVideoFileByAdName('f_v_b_o_l_0520_2', './videos', { baseDir: root })), 'f_v_b_o_l_0520_2.m4v');
+  await assert.rejects(
+    () => findVideoFileByAdName('f_v_b_o_l_0520_3', './videos', { baseDir: root }),
+    /Video file not found for ad name: f_v_b_o_l_0520_3.*f_v_b_o_l_0520_3\.mp4.*f_v_b_o_l_0520_3\.mov.*f_v_b_o_l_0520_3\.m4v/,
+  );
+});
+
+test('VIDEO_ONLY_CBO plan requires exact video files and landing URLs', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'video-cbo-plan-'));
+  const folder = path.join(root, 'videos');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(path.join(folder, 'f_v_b_o_l_0520_1.mp4'), '');
+  await fs.writeFile(path.join(folder, 'f_v_b_o_l_0520_2.mov'), '');
+
+  await assert.rejects(
+    () => buildVideoOnlyCboPlan({
+      CAMPAIGN_MODE: 'VIDEO_ONLY_CBO',
+      CAMPAIGN_NAME: '0520 CBO campaign',
+      CAMPAIGN_BUDGET: '25000',
+      ADSET_COUNT: '0',
+      AD_CREATIVE_COUNT: '1',
+      VIDEO_ONLY_CBO_VIDEO_FOLDER: './videos',
+      VIDEO_ONLY_CBO_LANDING_URL_1: 'https://example.com/1',
+    }, { baseDir: root, date: fixedDate }),
+    /Missing VIDEO_ONLY_CBO_LANDING_URL_2/,
+  );
+
+  const plan = await buildVideoOnlyCboPlan({
+    CAMPAIGN_MODE: 'VIDEO_ONLY_CBO',
+    CAMPAIGN_NAME: '0520 CBO campaign',
+    CAMPAIGN_BUDGET: '25000',
+    ADSET_COUNT: '0',
+    AD_CREATIVE_COUNT: '1',
+    VIDEO_ONLY_CBO_VIDEO_FOLDER: './videos',
+    VIDEO_ONLY_CBO_LANDING_URL_1: 'https://example.com/1',
+    VIDEO_ONLY_CBO_LANDING_URL_2: 'https://example.com/2',
+  }, { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.mode, CAMPAIGN_MODES.VIDEO_ONLY_CBO);
+  assert.equal(plan.campaignBudget, '25,000');
+  assert.equal(plan.adsets[0].ads[0].name, 'f_v_b_o_l_0520_1');
+  assert.equal(path.basename(plan.adsets[0].ads[1].assetPath), 'f_v_b_o_l_0520_2.mov');
+  assert.equal(plan.adsets[0].ads[1].landingUrl, 'https://example.com/2');
+});
+
+test('VIDEO_ONLY_CBO uses explicit campaign, adset, and ad names from env', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'video-cbo-explicit-'));
+  const folder = path.join(root, 'videos');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(path.join(folder, 'custom_ad_1.mp4'), '');
+
+  const plan = await buildVideoOnlyCboPlan({
+    CAMPAIGN_MODE: 'VIDEO_ONLY_CBO',
+    CAMPAIGN_NAME: 'My exact campaign name',
+    CAMPAIGN_BUDGET: '25000',
+    ADSET_COUNT: '0',
+    AD_CREATIVE_COUNT: '0',
+    VIDEO_ONLY_CBO_VIDEO_FOLDER: './videos',
+    VIDEO_ONLY_CBO_ADSET_NAME_1: 'My exact adset name',
+    VIDEO_ONLY_CBO_AD_NAME_1: 'custom_ad_1',
+    VIDEO_ONLY_CBO_LANDING_URL_1: 'https://example.com/custom',
+  }, { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.campaignName, 'My exact campaign name');
+  assert.equal(plan.adsets[0].name, 'My exact adset name');
+  assert.equal(plan.adsets[0].ads[0].name, 'custom_ad_1');
+  assert.equal(path.basename(plan.adsets[0].ads[0].assetPath), 'custom_ad_1.mp4');
+});
+
+test('IMAGE_ONLY validation is not blocked by VIDEO_ONLY_CBO requirements', async () => {
+  const result = await validateCampaignConfig({
+    CAMPAIGN_MODE: 'IMAGE_ONLY',
+    IMAGE_ONLY_UPLOAD_MODE: 'LEGACY',
+    CAMPAIGN_BUDGET: '',
+    VIDEO_ONLY_CBO_VIDEO_FOLDER: '',
+  });
+  assert.equal(result.mode, CAMPAIGN_MODES.IMAGE_ONLY);
+  assert.equal(result.plan, null);
 });
