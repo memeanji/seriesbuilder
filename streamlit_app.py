@@ -119,16 +119,12 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
                 "DATE_FORMAT=MMDD",
                 f"CAMPAIGN_BUDGET={values.get('CAMPAIGN_BUDGET', '')}",
                 f"{folder_key}={values.get(folder_key, '')}",
-                f"{mode_prefix}_AUTO_LANDING_URL=false",
+                f"{mode_prefix}_AUTO_LANDING_URL=true",
                 "",
             ]
         )
         adset_count = int(values.get("ADSET_COUNT", "0") or "0") + 1
         creative_count = int(values.get("AD_CREATIVE_COUNT", "0") or "0") + 1
-        for index in range(1, adset_count * creative_count + 1):
-            key = f"{mode_prefix}_LANDING_URL_{index}"
-            lines.append(f"{key}={values.get(key, '')}")
-        lines.append("")
         for index in range(1, adset_count + 1):
             key = f"{mode_prefix}_ADSET_NAME_{index}"
             lines.append(f"{key}={values.get(key, '')}")
@@ -276,18 +272,6 @@ def default_landing_url(ad_name: str, path_number: str = "100") -> str:
         path = "100"
     return f"https://repurely.com/surl/P/{path}?utm_source=f&utm_medium=f&utm_campaign={ad_name}"
 
-
-def landing_url_value(env: dict[str, str], key: str, ad_name: str, path_number: str) -> str:
-    current = env.get(key, "").strip()
-    if not current:
-        return default_landing_url(ad_name, path_number)
-    repurely_pattern = re.compile(r"^https://repurely\.com/surl/P/\d+\?utm_source=f&utm_medium=f&utm_campaign=([^&]+)$")
-    match = repurely_pattern.match(current)
-    if match and match.group(1) == ad_name:
-        return default_landing_url(ad_name, path_number)
-    return current
-
-
 def find_video_file_for_preview(ad_name: str, folder: str) -> tuple[str, list[str]]:
     expected = [f"{ad_name}.mp4", f"{ad_name}.mov", f"{ad_name}.m4v"]
     folder_path = Path(folder).expanduser()
@@ -405,8 +389,6 @@ def validate_form(values: dict[str, str]) -> list[str]:
             if not media_file:
                 media_type = "Image" if is_image_cbo else "Video"
                 errors.append(f"{media_type} file not found for ad name: {ad_name}. Expected one of: {', '.join(expected)}")
-            if not values.get(f"{mode_prefix}_LANDING_URL_{index}", "").strip():
-                errors.append(f"{mode_prefix}_LANDING_URL_{index} is required.")
     return errors
 
 
@@ -660,7 +642,7 @@ elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
         next_env[key] = adset_name
         adset_names[adset_index] = adset_name
 
-    st.subheader(f"Ads, {media_label_lower}s, and landing URLs")
+    st.subheader(f"Ads, {media_label_lower}s, and landing URL examples")
     for ad_index in range(1, total_ads + 1):
         adset_index = ((ad_index - 1) // creative_total) + 1
         ad_name_key = f"{mode_prefix}_AD_NAME_{ad_index}"
@@ -669,18 +651,15 @@ elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
         ad_name = st.text_input(f"Ad {ad_index} name", value=default_ad_name, key=ad_name_key)
         next_env[ad_name_key] = ad_name
         media_file, expected = (find_image_file_for_preview(ad_name, media_folder) if is_image_cbo else find_video_file_for_preview(ad_name, media_folder))
-        landing_key = f"{mode_prefix}_LANDING_URL_{ad_index}"
-        default_url = landing_url_value(env, landing_key, ad_name, str(landing_path_number))
-        landing_url = st.text_input(f"{ad_name} landing URL", value=default_url, key=landing_key)
-        next_env[landing_key] = landing_url
-        if not media_file or not landing_url.strip():
+        landing_url_example = default_landing_url(ad_name, str(landing_path_number))
+        if not media_file:
             missing_count += 1
         preview_rows.append(
             {
                 "adset": adset_names[adset_index],
                 "ad_name": ad_name,
                 f"{media_label_lower}_file": media_file or f"Missing: {', '.join(expected)}",
-                "landing_url": landing_url,
+                "landing_url_example": landing_url_example,
             }
         )
 
@@ -688,11 +667,12 @@ elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
         st.write(f"Campaign name: `{campaign_name or '(missing)'}`")
         st.write(f"Campaign budget: `{format_budget_preview(campaign_budget) or '(invalid)'}`")
         st.write(f"{media_label} folder: `{media_folder}`")
+        st.write(f"Landing URL pattern: `{default_landing_url('{ad_name}', str(landing_path_number))}`")
         st.dataframe(preview_rows, use_container_width=True)
         if missing_count:
-            st.error(f"{missing_count} ad rows have a missing {media_label_lower} file or landing URL.")
+            st.error(f"{missing_count} ad rows have a missing {media_label_lower} file.")
         else:
-            st.success(f"All {media_label_lower} files and landing URLs are ready.")
+            st.success(f"All {media_label_lower} files are ready. Landing URLs will be generated automatically.")
 elif campaign_mode == "VIDEO_ONLY":
     st.subheader("VIDEO_ONLY")
     st.caption("Video-only direct landing mode.")
