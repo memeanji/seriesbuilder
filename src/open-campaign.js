@@ -3506,6 +3506,13 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
   const totalRenameTarget = (effectiveAdsetCount * effectiveCreativeCount) + effectiveAdsetCount;
   const maxRenameAttempts = totalRenameTarget;
   const processedAdsetRows = new Set();
+  const processedAdRows = new Set();
+  const plannedAdNames = new Set(
+    (activeCampaignPlan?.adsets || [])
+      .flatMap((adset) => adset.ads || [])
+      .map((ad) => normalizeText(ad.name || ''))
+      .filter(Boolean),
+  );
 
   for (let attempt = 1; attempt <= maxRenameAttempts; attempt += 1) {
     await page.waitForTimeout(5000);
@@ -3565,7 +3572,10 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const isAlreadyTargetAdset = targetAdsetName && normalizedRowText.includes(normalizeText(targetAdsetName));
       const isDefaultAdsetRow = isAdsetStructureRow && /새\s*판매\s*광고\s*세트/.test(normalizedRowText);
       const isAdsetCopy = isAdsetStructureRow && /사본|copy/i.test(rowText);
-      const isAdCopy = isAdStructureRow;
+      const isAdRowCopy = /사본|copy/i.test(rowText);
+      const isDefaultAdRow = /새\s*판매\s*광고(?!\s*세트)/.test(normalizedRowText) || /광고\s*-\s*사본/.test(normalizedRowText);
+      const hasPlannedAdName = [...plannedAdNames].some((name) => name && normalizedRowText.includes(name));
+      const isAdCopy = isAdStructureRow && (isDefaultAdRow || isAdRowCopy || !hasPlannedAdName);
       const isBlogAdsetNameRow = isBlogMixedCampaign() && isAdsetStructureRow && /f_i_b_o_l_\d{4}_\d+/i.test(rowText);
       const isBlogAdsetCopyRow = isBlogAdsetNameRow && /사본|copy/i.test(rowText);
       const isImageOnlyAdsetNameRow = !isBlogMixedCampaign() && isAdsetStructureRow && /\d{4}\s+리타겟\s+\d+번\s+광고\s*세트/i.test(rowText);
@@ -3576,6 +3586,17 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
 
       if (processedAdsetRows.has(rowKey) && (isAdsetStructureRow || rowText.includes(ADSET_BASE_NAME) || isBlogAdsetNameRow)) {
         console.log('[DEBUG] already processed adset row skipped:', { rowKey, rowText: rowText.slice(0, 120) });
+        continue;
+      }
+
+      if (isAdStructureRow && hasPlannedAdName && !isAdRowCopy) {
+        processedAdRows.add(rowKey);
+        console.log('[DEBUG] already named ad row skipped:', { rowKey, rowText: rowText.slice(0, 120) });
+        continue;
+      }
+
+      if (processedAdRows.has(rowKey) && isAdStructureRow) {
+        console.log('[DEBUG] already processed ad row skipped:', { rowKey, rowText: rowText.slice(0, 120) });
         continue;
       }
 
@@ -3653,7 +3674,20 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       }
 
       if (isAdCopy && adCreativeIndex <= maxCreativeTotal) {
-        await page.mouse.click(rowBox.x + rowBox.width / 2, rowBox.y + rowBox.height / 2);
+        const adNameCell = await row
+          .$('[id^="default-button-for-action-menu_"], span._3dfi._3dfj')
+          .catch(() => null);
+        const adNameCellBox = await adNameCell?.boundingBox().catch(() => null);
+        if (adNameCellBox) {
+          console.log('[DEBUG] ad name cell click:', {
+            adCreativeIndex,
+            rowText: rowText.slice(0, 160),
+            adNameCellBox,
+          });
+          await page.mouse.click(adNameCellBox.x + Math.min(adNameCellBox.width / 2, 180), adNameCellBox.y + adNameCellBox.height / 2);
+        } else {
+          await page.mouse.click(rowBox.x + Math.min(rowBox.width / 2, 220), rowBox.y + rowBox.height / 2);
+        }
         await page.waitForTimeout(7000);
 
         const adNameInput = page.locator('input[placeholder="여기에 광고 이름을 입력하세요..."], input[placeholder*="광고 이름"], input[value*="새 판매 광고"]').first();
@@ -3753,6 +3787,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         await page.waitForTimeout(7000);
         console.log('[STEP] ad media handling completed - waiting before next ad search:', { targetAdName });
 
+        processedAdRows.add(rowKey);
         adCreativeIndex += 1;
         progressedThisAttempt = true;
       }
