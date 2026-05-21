@@ -2963,51 +2963,161 @@ async function clickRightmostMediaTileAndVerifySelected(page, selector, targetAd
 }
 
 async function clickMediaPickerButton(page, buttonText, attemptLabel, dataSurfacePart = '') {
-  const escapedText = buttonText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const textPattern = new RegExp(`^${escapedText}$`);
-  const candidates = [
-    {
-      name: `${buttonText} data-surface`,
-      locator: dataSurfacePart
-        ? page
-          .locator(`div[role="button"][aria-busy="false"][data-surface*="${dataSurfacePart}"]`)
-          .filter({ hasText: textPattern })
-          .first()
-        : page.locator('__never_matches__').first(),
-    },
-    {
-      name: `${buttonText} role button`,
-      locator: page.getByRole('button', { name: textPattern }).first(),
-    },
-    {
-      name: `${buttonText} text div`,
-      locator: page
-        .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
-        .filter({ hasText: textPattern })
-        .first(),
-    },
-    {
-      name: `${buttonText} plain text`,
-      locator: page.getByText(textPattern).first(),
-    },
-  ];
+  const labelGroups = {
+    다음: ['다음', 'Next'],
+    완료: ['완료', 'Done'],
+    저장: ['저장', 'Save'],
+    '건너뛰고 계속하기': ['건너뛰고 계속하기', '건너뛰고 계속', 'Skip and continue', 'Skip and Continue'],
+  };
+  const labels = labelGroups[buttonText] || [buttonText];
+  const escapedLabels = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const exactPattern = new RegExp(`^\\s*(?:${escapedLabels.join('|')})\\s*$`, 'i');
+  const containsPattern = new RegExp(`(?:${escapedLabels.join('|')})`, 'i');
 
-  for (const candidate of candidates) {
-    const visible = await candidate.locator.isVisible({ timeout: 2500 }).catch(() => false);
-    if (!visible) continue;
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const candidates = [
+      {
+        name: `${buttonText} data-surface exact`,
+        locator: dataSurfacePart
+          ? page
+            .locator(`button[data-surface*="${dataSurfacePart}"], [role="button"][aria-busy="false"][data-surface*="${dataSurfacePart}"]`)
+            .filter({ hasText: exactPattern })
+            .first()
+          : page.locator('__never_matches__').first(),
+      },
+      {
+        name: `${buttonText} role button exact`,
+        locator: page.getByRole('button', { name: exactPattern }).first(),
+      },
+      {
+        name: `${buttonText} button contains`,
+        locator: page.locator('button, [role="button"]').filter({ hasText: containsPattern }).first(),
+      },
+      {
+        name: `${buttonText} text ancestor button`,
+        locator: page
+          .getByText(containsPattern)
+          .locator('xpath=ancestor-or-self::*[@role="button" or self::button][1]')
+          .first(),
+      },
+      {
+        name: `${buttonText} primary data-surface fallback`,
+        locator: dataSurfacePart
+          ? page.locator(`button[data-surface*="${dataSurfacePart}"], [role="button"][data-surface*="${dataSurfacePart}"]`).last()
+          : page.locator('__never_matches__').first(),
+      },
+    ];
 
-    await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
-    await page.waitForTimeout(700);
-    const box = await candidate.locator.boundingBox().catch(() => null);
-    console.log('[DEBUG] media picker button candidate:', { buttonText, attemptLabel, name: candidate.name, box });
-    if (!box) continue;
+    for (const candidate of candidates) {
+      const visible = await candidate.locator.isVisible({ timeout: 1500 }).catch(() => false);
+      if (!visible) continue;
 
-    await candidate.locator.click({ force: true }).catch(async () => {
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      const disabled = await candidate.locator.evaluate((el) => (
+        el.getAttribute('aria-disabled') === 'true' ||
+        el.getAttribute('aria-busy') === 'true' ||
+        el.hasAttribute('disabled') ||
+        el.closest('[aria-disabled="true"], [aria-busy="true"]')
+      )).catch(() => false);
+      if (disabled) continue;
+
+      await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
+      await page.waitForTimeout(500);
+      const box = await candidate.locator.boundingBox().catch(() => null);
+      const text = await candidate.locator.innerText().catch(() => '');
+      console.log('[DEBUG] media picker button candidate:', {
+        buttonText,
+        attemptLabel,
+        attempt,
+        name: candidate.name,
+        text,
+        box,
+      });
+      if (!box) continue;
+
+      await candidate.locator.click({ force: true }).catch(async () => {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+      await page.waitForTimeout(1200);
+      console.log('[STEP] media picker button clicked:', { buttonText, attemptLabel, candidate: candidate.name });
+      return true;
+    }
+
+    const domFallback = await page.evaluate(({ labels: buttonLabels, dataSurfacePart: surfacePart }) => {
+      const normalize = (value) => String(value || '').replace(/\s+/g, '').toLowerCase();
+      const normalizedLabels = buttonLabels.map(normalize);
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const disabled = (el) => (
+        el.getAttribute('aria-disabled') === 'true' ||
+        el.getAttribute('aria-busy') === 'true' ||
+        el.hasAttribute('disabled') ||
+        Boolean(el.closest('[aria-disabled="true"], [aria-busy="true"]'))
+      );
+      const elements = [...document.querySelectorAll('button, [role="button"], div[tabindex="0"]')]
+        .filter((el) => isVisible(el) && !disabled(el))
+        .map((el) => {
+          const text = (el.innerText || el.textContent || '').trim();
+          const aria = el.getAttribute('aria-label') || '';
+          const surface = el.getAttribute('data-surface') || '';
+          const normalizedText = normalize(`${text} ${aria}`);
+          const exact = normalizedLabels.some((label) => normalizedText === label);
+          const contains = normalizedLabels.some((label) => normalizedText.includes(label));
+          const surfaceMatch = surfacePart && surface.includes(surfacePart);
+          const rect = el.getBoundingClientRect();
+          return {
+            el,
+            text,
+            aria,
+            surface,
+            exact,
+            contains,
+            surfaceMatch,
+            box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+          };
+        })
+        .filter((item) => item.exact || item.contains || item.surfaceMatch)
+        .sort((a, b) => {
+          const aScore = (a.exact ? 0 : a.contains ? 1 : 2);
+          const bScore = (b.exact ? 0 : b.contains ? 1 : 2);
+          return aScore - bScore || b.box.y - a.box.y || b.box.x - a.box.x;
+        });
+
+      const chosen = elements[0];
+      if (!chosen) {
+        return {
+          clicked: false,
+          candidates: elements.slice(0, 8).map(({ text, aria, surface, box }) => ({ text, aria, surface, box })),
+        };
+      }
+      chosen.el.scrollIntoView({ block: 'center', inline: 'center' });
+      chosen.el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      chosen.el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      chosen.el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      return {
+        clicked: true,
+        text: chosen.text,
+        aria: chosen.aria,
+        surface: chosen.surface,
+        box: chosen.box,
+      };
+    }, { labels, dataSurfacePart }).catch((error) => ({ clicked: false, error: error.message }));
+
+    console.log('[DEBUG] media picker DOM button fallback:', {
+      buttonText,
+      attemptLabel,
+      attempt,
+      domFallback,
     });
-    await page.waitForTimeout(1000);
-    console.log('[STEP] media picker button clicked:', { buttonText, attemptLabel, candidate: candidate.name });
-    return true;
+    if (domFallback.clicked) {
+      await page.waitForTimeout(1200);
+      console.log('[STEP] media picker button clicked by DOM fallback:', { buttonText, attemptLabel });
+      return true;
+    }
+
+    await page.waitForTimeout(1500);
   }
 
   return false;
