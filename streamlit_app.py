@@ -488,11 +488,18 @@ with right:
     adset_count_min = 1 if campaign_mode == "BLOG_MIXED" else 0
     adset_count_default = max(adset_count_min, int(env.get("ADSET_COUNT", "3") or "3"))
     adset_count_label = "Adset count (BLOG_MIXED actual adsets)" if campaign_mode == "BLOG_MIXED" else "Adset count"
+    if campaign_mode == "BLOG_MIXED":
+        adset_count_help = "입력한 숫자 그대로 실제 광고세트 개수입니다. 광고세트 1개당 이미지 4개 + 영상 1개, 총 5개 광고로 구성됩니다."
+    elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
+        adset_count_help = "CBO 모드에서는 아래 전용 입력값이 실제 광고세트 개수입니다. 이 공통 값은 전용 입력에서 다시 계산되어 저장됩니다."
+    else:
+        adset_count_help = "기존 IMAGE_ONLY/VIDEO_ONLY 흐름에서는 입력값이 복제 기준으로 저장되어 실제 광고세트는 입력값 + 1개로 구성됩니다. 예: 0 입력 -> 1개, 2 입력 -> 3개."
     adset_count = st.number_input(
         adset_count_label,
         min_value=adset_count_min,
         max_value=100,
         value=adset_count_default,
+        help=adset_count_help,
     )
     daily_budget = st.text_input("Daily budget", value=env.get("ADSET_DAILY_BUDGET", "300000"))
     schedule_time = st.text_input("Schedule time", value=env.get("SCHEDULE_TIME", "05:00"))
@@ -577,8 +584,20 @@ elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
     st.subheader(campaign_mode)
     st.caption(f"{media_label}-only CBO campaign creation mode.")
     campaign_budget = st.text_input("Campaign budget", value=env.get("CAMPAIGN_BUDGET", "25000"))
-    actual_adset_count = st.number_input("Adset count for this CBO campaign", min_value=1, max_value=100, value=int(env.get("ADSET_COUNT", "0") or "0") + 1)
-    media_count = st.number_input(f"{media_label} ads per adset", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "0") or "0") + 1)
+    actual_adset_count = st.number_input(
+        "Adset count for this CBO campaign",
+        min_value=1,
+        max_value=100,
+        value=int(env.get("ADSET_COUNT", "0") or "0") + 1,
+        help="입력한 숫자 그대로 실제 CBO 광고세트 개수입니다. 저장 시 Meta 복제 로직 때문에 .env의 ADSET_COUNT에는 입력값 - 1로 저장됩니다. 예: 3 입력 -> 실제 광고세트 3개, ADSET_COUNT=2",
+    )
+    media_count = st.number_input(
+        f"{media_label} ads per adset",
+        min_value=1,
+        max_value=100,
+        value=int(env.get("AD_CREATIVE_COUNT", "0") or "0") + 1,
+        help=f"입력한 숫자 그대로 광고세트 1개당 실제 {media_label_lower} 광고 개수입니다. 저장 시 .env의 AD_CREATIVE_COUNT에는 입력값 - 1로 저장됩니다. 예: 5 입력 -> 세트당 광고 5개, AD_CREATIVE_COUNT=4",
+    )
     media_folder = st.text_input(f"{media_label} file folder", value=env.get(folder_key, "./assets/images" if is_image_cbo else "./assets/videos"))
     next_env["CAMPAIGN_BUDGET"] = campaign_budget
     next_env["ADSET_COUNT"] = str(int(actual_adset_count) - 1)
@@ -638,7 +657,13 @@ elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
 elif campaign_mode == "VIDEO_ONLY":
     st.subheader("VIDEO_ONLY")
     st.caption("Video-only direct landing mode.")
-    video_count = st.number_input("Video ad count", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "1") or "1"))
+    video_count = st.number_input(
+        "Video ad count",
+        min_value=1,
+        max_value=100,
+        value=int(env.get("AD_CREATIVE_COUNT", "1") or "1"),
+        help="기존 VIDEO_ONLY 흐름에서는 이 값이 복제 기준으로 저장되어 실제 영상 광고는 입력값 + 1개로 구성됩니다. 예: 1 입력 -> 실제 2개.",
+    )
     video_root = st.text_input("Video asset root", value=env.get("VIDEO_ONLY_ASSET_ROOT", default_video_root()))
     next_env["AD_CREATIVE_COUNT"] = str(video_count)
     next_env["VIDEO_ONLY_ASSET_ROOT"] = video_root
@@ -661,7 +686,13 @@ elif campaign_mode == "VIDEO_ONLY":
         st.write(f"`https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_{mmdd}_2`")
 else:
     st.subheader("IMAGE_ONLY")
-    creative_count = st.number_input("Image ad count", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "4") or "4"))
+    creative_count = st.number_input(
+        "Image ad count",
+        min_value=1,
+        max_value=100,
+        value=int(env.get("AD_CREATIVE_COUNT", "4") or "4"),
+        help="기존 IMAGE_ONLY 흐름에서는 이 값이 복제 기준으로 저장되어 실제 이미지 광고는 입력값 + 1개로 구성됩니다. 예: 4 입력 -> 실제 5개.",
+    )
     per_ad_upload = st.checkbox(
         "Upload one image per ad",
         value=env.get("IMAGE_ONLY_UPLOAD_MODE", "PER_AD").upper() != "LEGACY",
