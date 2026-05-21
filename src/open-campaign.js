@@ -49,6 +49,7 @@ const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 const QUICK_TEST_CREATIVE_STEP = String(process.env.QUICK_TEST_CREATIVE_STEP || '').toLowerCase() === 'true';
 const ENABLE_SCREENSHOTS = parseBoolean(process.env.ENABLE_SCREENSHOTS);
 const QUICK_TEST_AD_NAME = process.env.QUICK_TEST_AD_NAME || getAdName(1);
+const VIDEO_UPLOAD_TIMEOUT_MS = 120_000;
 
 let firstCreativeMediaUploaded = false;
 let activeCampaignPlan = null;
@@ -2325,7 +2326,7 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
   }
 
   if (adFormat === 'video') {
-    await waitForVideoUploadComplete(page, targetAdName, 60000);
+    await waitForVideoUploadComplete(page, targetAdName, VIDEO_UPLOAD_TIMEOUT_MS);
   } else {
     await page.waitForTimeout(3000);
   }
@@ -2346,7 +2347,7 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
   await searchAndSelectExistingMedia(page, targetAdName);
 }
 
-async function waitForVideoUploadComplete(page, targetAdName, timeoutMs = 60000) {
+async function waitForVideoUploadComplete(page, targetAdName, timeoutMs = VIDEO_UPLOAD_TIMEOUT_MS) {
   const startedAt = Date.now();
   console.log('[STEP] upload started:', { targetAdName, timeoutMs });
   let lastSnapshot = {};
@@ -2388,13 +2389,14 @@ async function waitForVideoUploadComplete(page, targetAdName, timeoutMs = 60000)
     await page.waitForTimeout(3000);
   }
 
-  await debugDump(page, `video upload ambiguous after 60s ${targetAdName}`);
+  const timeoutSeconds = Math.round(timeoutMs / 1000);
+  await debugDump(page, `video upload ambiguous after ${timeoutSeconds}s ${targetAdName}`);
   await safeScreenshot(
     page,
     path.join(DIRS.screenshots, `video-upload-ambiguous-${targetAdName}.png`),
     `video upload ambiguous ${targetAdName}`,
   );
-  throw new Error(`Video upload completion was not confirmed within 60s for ${targetAdName}. Last status: ${JSON.stringify(lastSnapshot)}`);
+  throw new Error(`Video upload completion was not confirmed within ${timeoutSeconds}s for ${targetAdName}. Last status: ${JSON.stringify(lastSnapshot)}`);
 }
 
 async function searchAndSelectExistingMedia(page, targetAdName) {
