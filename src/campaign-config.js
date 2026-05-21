@@ -801,9 +801,8 @@ export async function buildVideoOnlyCboPlan(env = process.env, options = {}) {
   const campaignName = validateCampaignName(env.CAMPAIGN_NAME);
   const campaignBudget = formatBudgetForMetaInput(env.CAMPAIGN_BUDGET || env.VIDEO_ONLY_CBO_CAMPAIGN_BUDGET || '');
   const videoFolder = env.VIDEO_ONLY_CBO_VIDEO_FOLDER || env.VIDEO_ONLY_ASSET_ROOT || env.MEDIA_FOLDER_PATH || '';
-  const adsetDuplicateCount = readIntegerEnv(env, 'ADSET_COUNT', 0);
   const adCreativeDuplicateCount = readIntegerEnv(env, 'AD_CREATIVE_COUNT', readIntegerEnv(env, 'VIDEO_AD_COUNT', readIntegerEnv(env, 'ADSET_CREATIVE_COUNT', 0)));
-  const effectiveAdsetCount = adsetDuplicateCount + 1;
+  const effectiveAdsetCount = 1;
   const effectiveCreativeCount = adCreativeDuplicateCount + 1;
   const requiredAssetCount = effectiveAdsetCount * effectiveCreativeCount;
   const seenNames = new Set();
@@ -875,9 +874,8 @@ export async function buildImageOnlyCboPlan(env = process.env, options = {}) {
   const campaignName = validateCampaignName(env.CAMPAIGN_NAME);
   const campaignBudget = formatBudgetForMetaInput(env.CAMPAIGN_BUDGET || env.IMAGE_ONLY_CBO_CAMPAIGN_BUDGET || '');
   const imageFolder = env.IMAGE_ONLY_CBO_IMAGE_FOLDER || env.IMAGE_ONLY_ASSET_ROOT || env.MEDIA_FOLDER_PATH || '';
-  const adsetDuplicateCount = readIntegerEnv(env, 'ADSET_COUNT', 0);
   const adCreativeDuplicateCount = readIntegerEnv(env, 'AD_CREATIVE_COUNT', readIntegerEnv(env, 'IMAGE_AD_COUNT', readIntegerEnv(env, 'ADSET_CREATIVE_COUNT', 0)));
-  const effectiveAdsetCount = adsetDuplicateCount + 1;
+  const effectiveAdsetCount = 1;
   const effectiveCreativeCount = adCreativeDuplicateCount + 1;
   const requiredAssetCount = effectiveAdsetCount * effectiveCreativeCount;
   const seenNames = new Set();

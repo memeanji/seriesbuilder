@@ -374,7 +374,7 @@ def validate_form(values: dict[str, str]) -> list[str]:
         elif not Path(media_folder).expanduser().exists():
             errors.append(f"{folder_label} does not exist: {media_folder}")
 
-        adset_total = int(values.get("ADSET_COUNT", "0") or "0") + 1
+        adset_total = 1
         creative_total = int(values.get("AD_CREATIVE_COUNT", "0") or "0") + 1
         names: list[str] = []
         for index in range(1, adset_total * creative_total + 1):
@@ -488,22 +488,24 @@ with left:
     campaign_name = st.text_input("Campaign name", value=env.get("CAMPAIGN_NAME", ""))
 
 with right:
-    adset_count_min = 1 if campaign_mode == "BLOG_MIXED" else 0
-    adset_count_default = max(adset_count_min, int(env.get("ADSET_COUNT", "3") or "3"))
-    adset_count_label = "Adset count (BLOG_MIXED actual adsets)" if campaign_mode == "BLOG_MIXED" else "Adset count"
-    if campaign_mode == "BLOG_MIXED":
-        adset_count_help = "입력한 숫자 그대로 실제 광고세트 개수입니다. 광고세트 안의 소재 수는 BLOG_MIXED의 Ad creative count에서 정하고, 마지막 소재 1개는 영상입니다."
-    elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
-        adset_count_help = "CBO 모드에서는 아래 전용 입력값이 실제 광고세트 개수입니다. 이 공통 값은 전용 입력에서 다시 계산되어 저장됩니다."
+    if campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
+        adset_count = 0
+        st.info("CBO campaign structure: 1 campaign / 1 adset. Choose only the ad count below.")
     else:
-        adset_count_help = "기존 IMAGE_ONLY/VIDEO_ONLY 흐름에서는 입력값이 복제 기준으로 저장되어 실제 광고세트는 입력값 + 1개로 구성됩니다. 예: 0 입력 -> 1개, 2 입력 -> 3개."
-    adset_count = st.number_input(
-        adset_count_label,
-        min_value=adset_count_min,
-        max_value=100,
-        value=adset_count_default,
-        help=adset_count_help,
-    )
+        adset_count_min = 1 if campaign_mode == "BLOG_MIXED" else 0
+        adset_count_default = max(adset_count_min, int(env.get("ADSET_COUNT", "3") or "3"))
+        adset_count_label = "Adset count (BLOG_MIXED actual adsets)" if campaign_mode == "BLOG_MIXED" else "Adset count"
+        if campaign_mode == "BLOG_MIXED":
+            adset_count_help = "입력한 숫자 그대로 실제 광고세트 개수입니다. 광고세트 안의 소재 수는 BLOG_MIXED의 Ad creative count에서 정하고, 마지막 소재 1개는 영상입니다."
+        else:
+            adset_count_help = "기존 IMAGE_ONLY/VIDEO_ONLY 흐름에서는 입력값이 복제 기준으로 저장되어 실제 광고세트는 입력값 + 1개로 구성됩니다. 예: 0 입력 -> 1개, 2 입력 -> 3개."
+        adset_count = st.number_input(
+            adset_count_label,
+            min_value=adset_count_min,
+            max_value=100,
+            value=adset_count_default,
+            help=adset_count_help,
+        )
     daily_budget = st.text_input("Daily budget", value=env.get("ADSET_DAILY_BUDGET", "300000"))
     schedule_time = st.text_input("Schedule time", value=env.get("SCHEDULE_TIME", "05:00"))
     cdp_url = st.text_input("CDP URL", value=env.get("CDP_URL", "http://127.0.0.1:9222"))
@@ -600,27 +602,20 @@ elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
     st.subheader(campaign_mode)
     st.caption(f"{media_label}-only CBO campaign creation mode.")
     campaign_budget = st.text_input("Campaign budget", value=env.get("CAMPAIGN_BUDGET", "25000"))
-    actual_adset_count = st.number_input(
-        "Adset count for this CBO campaign",
-        min_value=1,
-        max_value=100,
-        value=int(env.get("ADSET_COUNT", "0") or "0") + 1,
-        help="입력한 숫자 그대로 실제 CBO 광고세트 개수입니다. 저장 시 Meta 복제 로직 때문에 .env의 ADSET_COUNT에는 입력값 - 1로 저장됩니다. 예: 3 입력 -> 실제 광고세트 3개, ADSET_COUNT=2",
-    )
     media_count = st.number_input(
-        f"{media_label} ads per adset",
+        f"{media_label} ad count",
         min_value=1,
         max_value=100,
         value=int(env.get("AD_CREATIVE_COUNT", "0") or "0") + 1,
-        help=f"입력한 숫자 그대로 광고세트 1개당 실제 {media_label_lower} 광고 개수입니다. 저장 시 .env의 AD_CREATIVE_COUNT에는 입력값 - 1로 저장됩니다. 예: 5 입력 -> 세트당 광고 5개, AD_CREATIVE_COUNT=4",
+        help=f"입력한 숫자 그대로 실제 {media_label_lower} 광고 개수입니다. CBO 모드는 광고세트 1개 고정이며, 저장 시 .env의 AD_CREATIVE_COUNT에는 입력값 - 1로 저장됩니다. 예: 5 입력 -> 실제 광고 5개, AD_CREATIVE_COUNT=4",
     )
     media_folder = st.text_input(f"{media_label} file folder", value=env.get(folder_key, "./assets/images" if is_image_cbo else "./assets/videos"))
     next_env["CAMPAIGN_BUDGET"] = campaign_budget
-    next_env["ADSET_COUNT"] = str(int(actual_adset_count) - 1)
+    next_env["ADSET_COUNT"] = "0"
     next_env["AD_CREATIVE_COUNT"] = str(int(media_count) - 1)
     next_env[folder_key] = media_folder
 
-    adset_total = int(actual_adset_count)
+    adset_total = 1
     creative_total = int(media_count)
     total_ads = adset_total * creative_total
     media_stems = list_image_stems_for_preview(media_folder) if is_image_cbo else list_video_stems_for_preview(media_folder)
@@ -628,7 +623,7 @@ elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
 
     preview_rows = []
     missing_count = 0
-    st.subheader("Adset names")
+    st.subheader("Adset name")
     adset_names: dict[int, str] = {}
     for adset_index in range(1, adset_total + 1):
         key = f"{mode_prefix}_ADSET_NAME_{adset_index}"

@@ -512,7 +512,7 @@ test('VIDEO_ONLY_CBO plan requires exact video files and landing URLs', async ()
     CAMPAIGN_MODE: 'VIDEO_ONLY_CBO',
     CAMPAIGN_NAME: '0520 CBO campaign',
     CAMPAIGN_BUDGET: '25000',
-    ADSET_COUNT: '0',
+    ADSET_COUNT: '9',
     AD_CREATIVE_COUNT: '1',
     VIDEO_ONLY_CBO_VIDEO_FOLDER: './videos',
     VIDEO_ONLY_CBO_LANDING_URL_1: 'https://example.com/1',
@@ -521,6 +521,8 @@ test('VIDEO_ONLY_CBO plan requires exact video files and landing URLs', async ()
 
   assert.equal(plan.mode, CAMPAIGN_MODES.VIDEO_ONLY_CBO);
   assert.equal(plan.campaignBudget, '25,000');
+  assert.equal(plan.adsetCount, 1);
+  assert.equal(plan.totalAds, 2);
   assert.equal(plan.adsets[0].ads[0].name, 'f_v_b_o_l_0520_1');
   assert.equal(path.basename(plan.adsets[0].ads[1].assetPath), 'f_v_b_o_l_0520_2.mov');
   assert.equal(plan.adsets[0].ads[1].landingUrl, 'https://example.com/2');
@@ -564,7 +566,7 @@ test('IMAGE_ONLY_CBO matches exact image filename and builds image CBO plan', as
     CAMPAIGN_MODE: 'IMAGE_ONLY_CBO',
     CAMPAIGN_NAME: '0520 image CBO campaign',
     CAMPAIGN_BUDGET: '25000',
-    ADSET_COUNT: '0',
+    ADSET_COUNT: '9',
     AD_CREATIVE_COUNT: '1',
     IMAGE_ONLY_CBO_IMAGE_FOLDER: './images',
     IMAGE_ONLY_CBO_LANDING_URL_1: 'https://example.com/1',
@@ -573,6 +575,8 @@ test('IMAGE_ONLY_CBO matches exact image filename and builds image CBO plan', as
 
   assert.equal(plan.mode, CAMPAIGN_MODES.IMAGE_ONLY_CBO);
   assert.equal(plan.campaignBudget, '25,000');
+  assert.equal(plan.adsetCount, 1);
+  assert.equal(plan.totalAds, 2);
   assert.equal(plan.adsets[0].ads[0].type, 'image');
   assert.equal(plan.adsets[0].ads[0].name, 'f_i_b_o_l_0520_1');
   assert.equal(path.basename(plan.adsets[0].ads[1].assetPath), 'f_i_b_o_l_0520_2.jpg');
