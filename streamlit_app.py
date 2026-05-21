@@ -13,6 +13,8 @@ APP_DIR = Path(__file__).resolve().parent
 ENV_PATH = APP_DIR / ".env"
 ADS_MANAGER_URL = "https://adsmanager.facebook.com/adsmanager/manage/campaigns"
 DEFAULT_ACCOUNT_ID = "1838892106940197"
+IS_WINDOWS = os.name == "nt"
+IS_STREAMLIT_CLOUD = bool(os.environ.get("STREAMLIT_RUNTIME") or os.environ.get("STREAMLIT_SHARING_MODE"))
 NOTIFICATION_DEFAULTS = {
     "ENABLE_DESKTOP_ALERT": "true",
     "NOTIFY_ON_SUCCESS": "true",
@@ -172,6 +174,8 @@ def run_command(command: list[str], timeout: int = 300) -> tuple[int, str]:
 
 
 def start_powershell(command: str) -> None:
+    if not IS_WINDOWS:
+        raise RuntimeError("PowerShell automation launcher is available only on the local Windows PC.")
     subprocess.Popen(
         [
             "powershell.exe",
@@ -182,7 +186,7 @@ def start_powershell(command: str) -> None:
             command,
         ],
         cwd=APP_DIR,
-        creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0,
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
     )
 
 
@@ -415,31 +419,39 @@ env = read_env()
 
 with st.sidebar:
     st.subheader("Actions")
+    if not IS_WINDOWS:
+        st.info("Cloud mode: Windows-only local automation buttons are disabled. Use this page for settings and preview, then run automation on your local PC.")
     if st.button("Pull latest code"):
         command = ["git", "pull", "origin", "main"]
         code, output = run_command(command)
         show_command_result("git pull", command, code, output)
 
-    if st.button("Install npm packages"):
-        command = ["npm.cmd", "install"]
+    if st.button("Install npm packages", disabled=not IS_WINDOWS):
+        command = ["npm.cmd" if IS_WINDOWS else "npm", "install"]
         code, output = run_command(command, timeout=600)
         show_command_result("npm install", command, code, output)
 
-    if st.button("Open .env in VS Code"):
+    if st.button("Open .env in VS Code", disabled=not IS_WINDOWS):
         subprocess.Popen(["code.cmd", str(ENV_PATH)], cwd=APP_DIR, shell=False)
         st.info(".env open requested.")
 
-    if st.button("Open Chrome CDP"):
+    if st.button("Open Chrome CDP", disabled=not IS_WINDOWS):
         account_id = env.get("AD_ACCOUNT_ID", DEFAULT_ACCOUNT_ID)
         url = f"{ADS_MANAGER_URL}?act={account_id}"
         chrome = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
         command = f'& "{chrome}" --remote-debugging-port=9222 --user-data-dir="C:\\chrome-debug" "{url}"'
-        start_powershell(command)
-        st.info("Chrome CDP PowerShell opened.")
+        try:
+            start_powershell(command)
+            st.info("Chrome CDP PowerShell opened.")
+        except Exception as exc:
+            st.error(f"Chrome CDP launcher is unavailable here: {exc}")
 
-    if st.button("Open automation terminal"):
-        start_powershell("npm run open-campaign")
-        st.info("Automation PowerShell opened.")
+    if st.button("Open automation terminal", disabled=not IS_WINDOWS):
+        try:
+            start_powershell("npm run open-campaign")
+            st.info("Automation PowerShell opened.")
+        except Exception as exc:
+            st.error(f"Automation terminal launcher is unavailable here: {exc}")
 
     st.subheader("Notifications")
     enable_desktop_alert = st.toggle(
@@ -799,7 +811,7 @@ with col2:
                 st.toast("작업 중단: 자세한 내용은 로그를 확인하세요")
 
 with col3:
-    if st.button("Run real automation terminal"):
+    if st.button("Run real automation terminal", disabled=not IS_WINDOWS):
         real_env = {**next_env, "DRY_RUN": "false"}
         errors = validate_form(real_env)
         saved = write_env(real_env)
@@ -811,9 +823,13 @@ with col3:
             for error in errors:
                 st.write(f"- {error}")
         else:
-            start_powershell("npm run open-campaign")
-            st.warning("DRY_RUN=false saved. Automation terminal opened.")
-            st.toast("자동화 터미널을 열었습니다. 완료/에러 알림은 실제 실행 결과에 따라 표시됩니다")
+            try:
+                start_powershell("npm run open-campaign")
+                st.warning("DRY_RUN=false saved. Automation terminal opened.")
+                st.toast("자동화 터미널을 열었습니다. 완료/에러 알림은 실제 실행 결과에 따라 표시됩니다")
+            except Exception as exc:
+                st.error(f"Automation terminal launcher is unavailable here: {exc}")
+                st.info("Streamlit Cloud can preview settings, but real Meta automation must run on your local Windows PC.")
 
 with st.expander("Current .env", expanded=False):
     if ENV_PATH.exists():
