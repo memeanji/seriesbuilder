@@ -515,14 +515,23 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
   const baseDir = options.baseDir || process.cwd();
   const date = options.date || new Date();
   const adsetCount = readIntegerEnv(env, 'ADSET_COUNT', 1);
-  const imageAdsPerAdset = readIntegerEnv(env, 'BLOG_IMAGE_ADS_PER_ADSET', 4);
-  const videoAdsPerAdset = readIntegerEnv(env, 'BLOG_VIDEO_ADS_PER_ADSET', 1);
-  const totalAdsPerAdset = readIntegerEnv(env, 'BLOG_TOTAL_ADS_PER_ADSET', imageAdsPerAdset + videoAdsPerAdset);
+  const fallbackTotalAdsPerAdset = readIntegerEnv(
+    env,
+    'BLOG_TOTAL_ADS_PER_ADSET',
+    readIntegerEnv(env, 'BLOG_IMAGE_ADS_PER_ADSET', 4) + readIntegerEnv(env, 'BLOG_VIDEO_ADS_PER_ADSET', 1),
+  );
+  const adCreativeDuplicateCount = readIntegerEnv(
+    env,
+    'AD_CREATIVE_COUNT',
+    readIntegerEnv(env, 'ADSET_CREATIVE_COUNT', Math.max(fallbackTotalAdsPerAdset - 1, 1)),
+  );
+  const totalAdsPerAdset = adCreativeDuplicateCount + 1;
+  const videoAdsPerAdset = 1;
+  const imageAdsPerAdset = totalAdsPerAdset - videoAdsPerAdset;
 
   if (adsetCount < 1) throw new Error('ADSET_COUNT must be >= 1.');
-  if (imageAdsPerAdset !== 4) throw new Error('BLOG_MIXED requires BLOG_IMAGE_ADS_PER_ADSET=4.');
-  if (videoAdsPerAdset !== 1) throw new Error('BLOG_MIXED requires BLOG_VIDEO_ADS_PER_ADSET=1.');
-  if (totalAdsPerAdset !== 5) throw new Error('BLOG_MIXED requires BLOG_TOTAL_ADS_PER_ADSET=5.');
+  if (adCreativeDuplicateCount < 1) throw new Error('AD_CREATIVE_COUNT must be >= 1 for BLOG_MIXED.');
+  if (imageAdsPerAdset < 1) throw new Error('BLOG_MIXED requires at least 1 image ad before the final video ad.');
 
   const adsets = [];
   for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
@@ -531,8 +540,8 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
     const videoAssets = await getVideoAssetsForAdset(adsetIndex, env, { baseDir });
     const videoAsset = videoAssets[0] || '';
 
-    if (imageAssets.length !== 4) {
-      throw new Error(`BLOG_MIXED requires exactly 4 image assets for adset ${adsetIndex}. Found ${imageAssets.length}.`);
+    if (imageAssets.length !== imageAdsPerAdset) {
+      throw new Error(`BLOG_MIXED requires exactly ${imageAdsPerAdset} image assets for adset ${adsetIndex}. Found ${imageAssets.length}.`);
     }
 
     const invalidImage = imageAssets.find((assetPath) => !IMAGE_EXTENSIONS.test(assetPath));
@@ -602,6 +611,7 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
     mode: CAMPAIGN_MODES.BLOG_MIXED,
     campaignName: env.CAMPAIGN_NAME || '',
     adsetCount,
+    adCreativeDuplicateCount,
     imageAdsPerAdset,
     videoAdsPerAdset,
     totalAdsPerAdset,

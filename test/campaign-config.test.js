@@ -62,6 +62,7 @@ function blogEnv(root, overrides = {}) {
     CAMPAIGN_MODE: 'BLOG_MIXED',
     CAMPAIGN_NAME: 'Blog campaign',
     ADSET_COUNT: '5',
+    AD_CREATIVE_COUNT: '4',
     BLOG_IMAGE_ADS_PER_ADSET: '4',
     BLOG_VIDEO_ADS_PER_ADSET: '1',
     BLOG_TOTAL_ADS_PER_ADSET: '5',
@@ -274,6 +275,28 @@ test('BLOG_MIXED ad names continue across adsets', async () => {
     'f_i_b_o_l_0520_8',
     'f_i_b_o_l_0520_9',
     'f_v_b_o_l_0520_10',
+  ]);
+});
+
+test('BLOG_MIXED uses AD_CREATIVE_COUNT plus one and puts video last', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-plan-'));
+  await createBlogAssets(root, 2, 3);
+  const plan = await buildBlogMixedPlan(blogEnv(root, { ADSET_COUNT: '2', AD_CREATIVE_COUNT: '3' }), { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.totalAdsPerAdset, 4);
+  assert.equal(plan.imageAdsPerAdset, 3);
+  assert.equal(plan.videoAdsPerAdset, 1);
+  assert.deepEqual(plan.adsets[0].ads.map((ad) => `${ad.type}:${ad.name}`), [
+    'image:f_i_b_o_l_0520_1',
+    'image:f_i_b_o_l_0520_2',
+    'image:f_i_b_o_l_0520_3',
+    'video:f_v_b_o_l_0520_4',
+  ]);
+  assert.deepEqual(plan.adsets[1].ads.map((ad) => `${ad.type}:${ad.name}`), [
+    'image:f_i_b_o_l_0520_5',
+    'image:f_i_b_o_l_0520_6',
+    'image:f_i_b_o_l_0520_7',
+    'video:f_v_b_o_l_0520_8',
   ]);
 });
 
