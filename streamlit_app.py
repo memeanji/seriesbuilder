@@ -417,7 +417,7 @@ with st.sidebar:
         <div style="font-size:0.82rem; line-height:1.45; color:rgba(49,51,63,0.70);">
           <div style="margin-bottom:5.2px;">Meta Ads Automation</div>
           <a href="https://repurely.com/" target="_blank" style="display:block; margin-bottom:5.2px; color:inherit; text-decoration:none;">https://repurely.com</a>
-          <div>@memenaji</div>
+          <div>@memeanji</div>
         </div>
         """,
         unsafe_allow_html=True,
