@@ -3518,6 +3518,15 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const rowId = await row
         .evaluate((el) => el.getAttribute('data-id') || el.id || el.querySelector('[data-id]')?.getAttribute('data-id') || '')
         .catch(() => '');
+      const rowMeta = await row.evaluate((el) => {
+        const rowHeader = el.matches?.('[role="rowheader"]') ? el : el.querySelector?.('[role="rowheader"]');
+        const surface = el.closest?.('[data-surface]') || el.querySelector?.('[data-surface]');
+        return {
+          ariaLabel: el.getAttribute('aria-label') || rowHeader?.getAttribute('aria-label') || '',
+          objectType: el.getAttribute('data-objecttype') || rowHeader?.getAttribute('data-objecttype') || '',
+          surface: surface?.getAttribute('data-surface') || '',
+        };
+      }).catch(() => ({ ariaLabel: '', objectType: '', surface: '' }));
       const rowKey = rowId || `${Math.round(rowBox.x)}:${Math.round(rowBox.y)}:${rowText.slice(0, 80)}`;
       const targetAdsetName = adsetIndex <= adsetEndIndex
         ? (isBlogMixedCampaign()
@@ -3528,18 +3537,35 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
               ? buildVideoOnlyCboAdsetName(adsetIndex, process.env)
               : (isImageOnlyCboCampaign() ? buildImageOnlyCboAdsetName(adsetIndex, process.env) : getAdsetName(adsetIndex)))))
         : '';
-      const isAlreadyTargetAdset = targetAdsetName && normalizeText(rowText).includes(normalizeText(targetAdsetName));
-      const isAdsetCopy = rowText.includes('광고세트') && rowText.includes('사본');
-      const isAdCopy = rowText.includes('새 판매 광고') || rowText.includes('광고 - 사본') || rowText.includes('광고명');
-      const isBlogAdsetNameRow = isBlogMixedCampaign() && /f_i_b_o_l_\d{4}_\d+/i.test(rowText);
+      const normalizedRowText = normalizeText(rowText);
+      const isAdsetStructureRow =
+        normalizeText(rowMeta.ariaLabel).includes('광고 세트') ||
+        rowMeta.surface.includes('editor_tree:adset') ||
+        /새\s*판매\s*광고\s*세트/.test(normalizedRowText) ||
+        /광고\s*세트/.test(normalizedRowText) ||
+        normalizedRowText.includes('광고세트');
+      const isAdStructureRow =
+        !isAdsetStructureRow &&
+        (
+          normalizeText(rowMeta.ariaLabel) === '광고' ||
+          rowMeta.surface.includes('editor_tree:ad') ||
+          /새\s*판매\s*광고(?!\s*세트)/.test(normalizedRowText) ||
+          /광고\s*-\s*사본/.test(normalizedRowText) ||
+          normalizedRowText.includes('광고명')
+        );
+      const isAlreadyTargetAdset = targetAdsetName && normalizedRowText.includes(normalizeText(targetAdsetName));
+      const isDefaultAdsetRow = isAdsetStructureRow && /새\s*판매\s*광고\s*세트/.test(normalizedRowText);
+      const isAdsetCopy = isAdsetStructureRow && /사본|copy/i.test(rowText);
+      const isAdCopy = isAdStructureRow;
+      const isBlogAdsetNameRow = isBlogMixedCampaign() && isAdsetStructureRow && /f_i_b_o_l_\d{4}_\d+/i.test(rowText);
       const isBlogAdsetCopyRow = isBlogAdsetNameRow && /사본|copy/i.test(rowText);
-      const isImageOnlyAdsetNameRow = !isBlogMixedCampaign() && /\d{4}\s+리타겟\s+\d+번\s+광고세트/i.test(rowText);
-      const isVideoOnlyAdsetNameRow = isVideoOnlyCampaign() && /\d{4}\s+직접세팅\s+광고세트\s*-\s*\d+/i.test(rowText);
-      const isVideoOnlyCboAdsetNameRow = isVideoOnlyCboCampaign() && /\d{4}\s+CBO\s+광고세트\s*-\s*\d+/i.test(rowText);
-      const isImageOnlyCboAdsetNameRow = isImageOnlyCboCampaign() && /\d{4}\s+CBO\s+광고세트\s*-\s*\d+/i.test(rowText);
-      const shouldRenameAdsetRow = (isAdsetCopy || isBlogAdsetNameRow || isImageOnlyAdsetNameRow || isVideoOnlyAdsetNameRow || isVideoOnlyCboAdsetNameRow || isImageOnlyCboAdsetNameRow) && adsetIndex <= adsetEndIndex;
+      const isImageOnlyAdsetNameRow = !isBlogMixedCampaign() && isAdsetStructureRow && /\d{4}\s+리타겟\s+\d+번\s+광고\s*세트/i.test(rowText);
+      const isVideoOnlyAdsetNameRow = isVideoOnlyCampaign() && isAdsetStructureRow && /\d{4}\s+직접세팅\s+광고\s*세트\s*-\s*\d+/i.test(rowText);
+      const isVideoOnlyCboAdsetNameRow = isVideoOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(rowText);
+      const isImageOnlyCboAdsetNameRow = isImageOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(rowText);
+      const shouldRenameAdsetRow = (isDefaultAdsetRow || isAdsetCopy || isBlogAdsetNameRow || isImageOnlyAdsetNameRow || isVideoOnlyAdsetNameRow || isVideoOnlyCboAdsetNameRow || isImageOnlyCboAdsetNameRow) && adsetIndex <= adsetEndIndex;
 
-      if (processedAdsetRows.has(rowKey) && (rowText.includes('광고세트') || rowText.includes('광고 세트') || rowText.includes(ADSET_BASE_NAME) || isBlogAdsetNameRow)) {
+      if (processedAdsetRows.has(rowKey) && (isAdsetStructureRow || rowText.includes(ADSET_BASE_NAME) || isBlogAdsetNameRow)) {
         console.log('[DEBUG] already processed adset row skipped:', { rowKey, rowText: rowText.slice(0, 120) });
         continue;
       }
@@ -3574,6 +3600,12 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           progressedThisAttempt = true;
           continue;
         }
+        console.log('[WARN] adset row clicked but adset name input not visible:', {
+          targetAdsetName,
+          rowText: rowText.slice(0, 160),
+          rowMeta,
+        });
+        continue;
       }
 
       if (isAdCopy && adCreativeIndex <= maxCreativeTotal) {
