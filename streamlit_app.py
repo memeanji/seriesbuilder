@@ -101,30 +101,35 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
                 "",
             ]
         )
-    elif mode == "VIDEO_ONLY_CBO":
+    elif mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
+        is_image_cbo = mode == "IMAGE_ONLY_CBO"
+        mode_prefix = "IMAGE_ONLY_CBO" if is_image_cbo else "VIDEO_ONLY_CBO"
+        folder_key = "IMAGE_ONLY_CBO_IMAGE_FOLDER" if is_image_cbo else "VIDEO_ONLY_CBO_VIDEO_FOLDER"
+        ad_prefix_key = "IMAGE_ONLY_CBO_AD_NAME_PREFIX" if is_image_cbo else "VIDEO_ONLY_CBO_AD_NAME_PREFIX"
+        ad_prefix_value = "f_i_b_o_l" if is_image_cbo else "f_v_b_o_l"
         lines.extend(
             [
                 f"AD_CREATIVE_COUNT={values.get('AD_CREATIVE_COUNT', '0')}",
-                "AD_FORMAT=video",
-                "VIDEO_ONLY_CBO_AD_NAME_PREFIX=f_v_b_o_l",
+                f"AD_FORMAT={'image' if is_image_cbo else 'video'}",
+                f"{ad_prefix_key}={ad_prefix_value}",
                 "DATE_FORMAT=MMDD",
                 f"CAMPAIGN_BUDGET={values.get('CAMPAIGN_BUDGET', '')}",
-                f"VIDEO_ONLY_CBO_VIDEO_FOLDER={values.get('VIDEO_ONLY_CBO_VIDEO_FOLDER', '')}",
-                "VIDEO_ONLY_CBO_AUTO_LANDING_URL=false",
+                f"{folder_key}={values.get(folder_key, '')}",
+                f"{mode_prefix}_AUTO_LANDING_URL=false",
                 "",
             ]
         )
         adset_count = int(values.get("ADSET_COUNT", "0") or "0") + 1
         creative_count = int(values.get("AD_CREATIVE_COUNT", "0") or "0") + 1
         for index in range(1, adset_count * creative_count + 1):
-            key = f"VIDEO_ONLY_CBO_LANDING_URL_{index}"
+            key = f"{mode_prefix}_LANDING_URL_{index}"
             lines.append(f"{key}={values.get(key, '')}")
         lines.append("")
         for index in range(1, adset_count + 1):
-            key = f"VIDEO_ONLY_CBO_ADSET_NAME_{index}"
+            key = f"{mode_prefix}_ADSET_NAME_{index}"
             lines.append(f"{key}={values.get(key, '')}")
         for index in range(1, adset_count * creative_count + 1):
-            key = f"VIDEO_ONLY_CBO_AD_NAME_{index}"
+            key = f"{mode_prefix}_AD_NAME_{index}"
             lines.append(f"{key}={values.get(key, '')}")
         lines.append("")
     else:
@@ -246,7 +251,17 @@ def build_video_only_cbo_ad_name(index: int) -> str:
     return f"f_v_b_o_l_{mmdd}_{index}"
 
 
+def build_image_only_cbo_ad_name(index: int) -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    return f"f_i_b_o_l_{mmdd}_{index}"
+
+
 def build_video_only_cbo_adset_name(index: int) -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    return f"{mmdd} CBO 광고세트 -{index}"
+
+
+def build_image_only_cbo_adset_name(index: int) -> str:
     mmdd = datetime.now().strftime("%m%d")
     return f"{mmdd} CBO 광고세트 -{index}"
 
@@ -265,6 +280,16 @@ def find_video_file_for_preview(ad_name: str, folder: str) -> tuple[str, list[st
     return "", expected
 
 
+def find_image_file_for_preview(ad_name: str, folder: str) -> tuple[str, list[str]]:
+    expected = [f"{ad_name}.png", f"{ad_name}.jpg", f"{ad_name}.jpeg", f"{ad_name}.webp", f"{ad_name}.gif"]
+    folder_path = Path(folder).expanduser()
+    for filename in expected:
+        candidate = folder_path / filename
+        if candidate.exists():
+            return str(candidate), expected
+    return "", expected
+
+
 def list_video_stems_for_preview(folder: str) -> list[str]:
     folder_path = Path(folder).expanduser()
     if not folder_path.exists() or not folder_path.is_dir():
@@ -273,6 +298,18 @@ def list_video_stems_for_preview(folder: str) -> list[str]:
         item
         for item in folder_path.iterdir()
         if item.is_file() and item.suffix.lower() in [".mp4", ".mov", ".m4v"]
+    ]
+    return [item.stem for item in sorted(files, key=lambda item: item.name.lower())]
+
+
+def list_image_stems_for_preview(folder: str) -> list[str]:
+    folder_path = Path(folder).expanduser()
+    if not folder_path.exists() or not folder_path.is_dir():
+        return []
+    files = [
+        item
+        for item in folder_path.iterdir()
+        if item.is_file() and item.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp", ".gif"]
     ]
     return [item.stem for item in sorted(files, key=lambda item: item.name.lower())]
 
@@ -319,29 +356,35 @@ def validate_form(values: dict[str, str]) -> list[str]:
     elif values.get("CAMPAIGN_MODE") == "VIDEO_ONLY":
         if not values.get("VIDEO_ONLY_ASSET_ROOT", "").strip():
             errors.append("VIDEO_ONLY_ASSET_ROOT is required for VIDEO_ONLY.")
-    elif values.get("CAMPAIGN_MODE") == "VIDEO_ONLY_CBO":
+    elif values.get("CAMPAIGN_MODE") in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
+        mode = values.get("CAMPAIGN_MODE")
+        is_image_cbo = mode == "IMAGE_ONLY_CBO"
+        mode_prefix = "IMAGE_ONLY_CBO" if is_image_cbo else "VIDEO_ONLY_CBO"
+        folder_key = "IMAGE_ONLY_CBO_IMAGE_FOLDER" if is_image_cbo else "VIDEO_ONLY_CBO_VIDEO_FOLDER"
+        folder_label = "Image folder" if is_image_cbo else "Video folder"
         budget_preview = format_budget_preview(values.get("CAMPAIGN_BUDGET", ""))
         if not budget_preview:
-            errors.append("Campaign budget must be a positive integer for VIDEO_ONLY_CBO.")
-        video_folder = values.get("VIDEO_ONLY_CBO_VIDEO_FOLDER", "").strip()
-        if not video_folder:
-            errors.append("Video folder is required for VIDEO_ONLY_CBO.")
-        elif not Path(video_folder).expanduser().exists():
-            errors.append(f"Video folder does not exist: {video_folder}")
+            errors.append(f"Campaign budget must be a positive integer for {mode}.")
+        media_folder = values.get(folder_key, "").strip()
+        if not media_folder:
+            errors.append(f"{folder_label} is required for {mode}.")
+        elif not Path(media_folder).expanduser().exists():
+            errors.append(f"{folder_label} does not exist: {media_folder}")
 
         adset_total = int(values.get("ADSET_COUNT", "0") or "0") + 1
         creative_total = int(values.get("AD_CREATIVE_COUNT", "0") or "0") + 1
         names: list[str] = []
         for index in range(1, adset_total * creative_total + 1):
-            ad_name = values.get(f"VIDEO_ONLY_CBO_AD_NAME_{index}", "").strip() or build_video_only_cbo_ad_name(index)
+            ad_name = values.get(f"{mode_prefix}_AD_NAME_{index}", "").strip() or (build_image_only_cbo_ad_name(index) if is_image_cbo else build_video_only_cbo_ad_name(index))
             if ad_name in names:
                 errors.append(f"Duplicate ad name: {ad_name}")
             names.append(ad_name)
-            video_file, expected = find_video_file_for_preview(ad_name, video_folder)
-            if not video_file:
-                errors.append(f"Video file not found for ad name: {ad_name}. Expected one of: {', '.join(expected)}")
-            if not values.get(f"VIDEO_ONLY_CBO_LANDING_URL_{index}", "").strip():
-                errors.append(f"VIDEO_ONLY_CBO_LANDING_URL_{index} is required.")
+            media_file, expected = (find_image_file_for_preview(ad_name, media_folder) if is_image_cbo else find_video_file_for_preview(ad_name, media_folder))
+            if not media_file:
+                media_type = "Image" if is_image_cbo else "Video"
+                errors.append(f"{media_type} file not found for ad name: {ad_name}. Expected one of: {', '.join(expected)}")
+            if not values.get(f"{mode_prefix}_LANDING_URL_{index}", "").strip():
+                errors.append(f"{mode_prefix}_LANDING_URL_{index} is required.")
     return errors
 
 
@@ -428,7 +471,7 @@ st.subheader("Campaign Settings")
 
 left, right = st.columns(2)
 with left:
-    campaign_mode_options = ["BLOG_MIXED", "IMAGE_ONLY", "VIDEO_ONLY_CBO"]
+    campaign_mode_options = ["BLOG_MIXED", "IMAGE_ONLY", "VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"]
     current_campaign_mode = env.get("CAMPAIGN_MODE", "IMAGE_ONLY")
     if current_campaign_mode not in campaign_mode_options:
         current_campaign_mode = "IMAGE_ONLY"
@@ -525,22 +568,27 @@ if campaign_mode == "BLOG_MIXED":
             st.error(f"Landing URL missing for adset(s): {', '.join(map(str, missing_urls))}")
         else:
             st.success("All adset landing URLs are ready.")
-elif campaign_mode == "VIDEO_ONLY_CBO":
-    st.subheader("VIDEO_ONLY_CBO")
-    st.caption("Video-only CBO campaign creation mode.")
+elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
+    is_image_cbo = campaign_mode == "IMAGE_ONLY_CBO"
+    mode_prefix = "IMAGE_ONLY_CBO" if is_image_cbo else "VIDEO_ONLY_CBO"
+    media_label = "Image" if is_image_cbo else "Video"
+    media_label_lower = "image" if is_image_cbo else "video"
+    folder_key = "IMAGE_ONLY_CBO_IMAGE_FOLDER" if is_image_cbo else "VIDEO_ONLY_CBO_VIDEO_FOLDER"
+    st.subheader(campaign_mode)
+    st.caption(f"{media_label}-only CBO campaign creation mode.")
     campaign_budget = st.text_input("Campaign budget", value=env.get("CAMPAIGN_BUDGET", "25000"))
     actual_adset_count = st.number_input("Adset count for this CBO campaign", min_value=1, max_value=100, value=int(env.get("ADSET_COUNT", "0") or "0") + 1)
-    video_count = st.number_input("Video ads per adset", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "0") or "0") + 1)
-    video_folder = st.text_input("Video file folder", value=env.get("VIDEO_ONLY_CBO_VIDEO_FOLDER", "./assets/videos"))
+    media_count = st.number_input(f"{media_label} ads per adset", min_value=1, max_value=100, value=int(env.get("AD_CREATIVE_COUNT", "0") or "0") + 1)
+    media_folder = st.text_input(f"{media_label} file folder", value=env.get(folder_key, "./assets/images" if is_image_cbo else "./assets/videos"))
     next_env["CAMPAIGN_BUDGET"] = campaign_budget
     next_env["ADSET_COUNT"] = str(int(actual_adset_count) - 1)
-    next_env["AD_CREATIVE_COUNT"] = str(int(video_count) - 1)
-    next_env["VIDEO_ONLY_CBO_VIDEO_FOLDER"] = video_folder
+    next_env["AD_CREATIVE_COUNT"] = str(int(media_count) - 1)
+    next_env[folder_key] = media_folder
 
     adset_total = int(actual_adset_count)
-    creative_total = int(video_count)
+    creative_total = int(media_count)
     total_ads = adset_total * creative_total
-    video_stems = list_video_stems_for_preview(video_folder)
+    media_stems = list_image_stems_for_preview(media_folder) if is_image_cbo else list_video_stems_for_preview(media_folder)
     st.info(f"Budget preview for Meta: {format_budget_preview(campaign_budget) or 'invalid budget'}")
 
     preview_rows = []
@@ -548,43 +596,45 @@ elif campaign_mode == "VIDEO_ONLY_CBO":
     st.subheader("Adset names")
     adset_names: dict[int, str] = {}
     for adset_index in range(1, adset_total + 1):
-        key = f"VIDEO_ONLY_CBO_ADSET_NAME_{adset_index}"
-        adset_name = st.text_input(f"Adset {adset_index} name", value=env.get(key, build_video_only_cbo_adset_name(adset_index)), key=key)
+        key = f"{mode_prefix}_ADSET_NAME_{adset_index}"
+        default_adset_name = build_image_only_cbo_adset_name(adset_index) if is_image_cbo else build_video_only_cbo_adset_name(adset_index)
+        adset_name = st.text_input(f"Adset {adset_index} name", value=env.get(key, default_adset_name), key=key)
         next_env[key] = adset_name
         adset_names[adset_index] = adset_name
 
-    st.subheader("Ads, videos, and landing URLs")
+    st.subheader(f"Ads, {media_label_lower}s, and landing URLs")
     for ad_index in range(1, total_ads + 1):
         adset_index = ((ad_index - 1) // creative_total) + 1
-        ad_name_key = f"VIDEO_ONLY_CBO_AD_NAME_{ad_index}"
-        default_ad_name = env.get(ad_name_key) or (video_stems[ad_index - 1] if ad_index <= len(video_stems) else build_video_only_cbo_ad_name(ad_index))
+        ad_name_key = f"{mode_prefix}_AD_NAME_{ad_index}"
+        default_builder = build_image_only_cbo_ad_name if is_image_cbo else build_video_only_cbo_ad_name
+        default_ad_name = env.get(ad_name_key) or (media_stems[ad_index - 1] if ad_index <= len(media_stems) else default_builder(ad_index))
         ad_name = st.text_input(f"Ad {ad_index} name", value=default_ad_name, key=ad_name_key)
         next_env[ad_name_key] = ad_name
-        video_file, expected = find_video_file_for_preview(ad_name, video_folder)
-        landing_key = f"VIDEO_ONLY_CBO_LANDING_URL_{ad_index}"
+        media_file, expected = (find_image_file_for_preview(ad_name, media_folder) if is_image_cbo else find_video_file_for_preview(ad_name, media_folder))
+        landing_key = f"{mode_prefix}_LANDING_URL_{ad_index}"
         default_url = env.get(landing_key, default_landing_url(ad_name))
         landing_url = st.text_input(f"{ad_name} landing URL", value=default_url, key=landing_key)
         next_env[landing_key] = landing_url
-        if not video_file or not landing_url.strip():
+        if not media_file or not landing_url.strip():
             missing_count += 1
         preview_rows.append(
             {
                 "adset": adset_names[adset_index],
                 "ad_name": ad_name,
-                "video_file": video_file or f"Missing: {', '.join(expected)}",
+                f"{media_label_lower}_file": media_file or f"Missing: {', '.join(expected)}",
                 "landing_url": landing_url,
             }
         )
 
-    with st.expander("VIDEO_ONLY_CBO preview / validation", expanded=True):
+    with st.expander(f"{campaign_mode} preview / validation", expanded=True):
         st.write(f"Campaign name: `{campaign_name or '(missing)'}`")
         st.write(f"Campaign budget: `{format_budget_preview(campaign_budget) or '(invalid)'}`")
-        st.write(f"Video folder: `{video_folder}`")
+        st.write(f"{media_label} folder: `{media_folder}`")
         st.dataframe(preview_rows, use_container_width=True)
         if missing_count:
-            st.error(f"{missing_count} ad rows have a missing video file or landing URL.")
+            st.error(f"{missing_count} ad rows have a missing {media_label_lower} file or landing URL.")
         else:
-            st.success("All video files and landing URLs are ready.")
+            st.success(f"All {media_label_lower} files and landing URLs are ready.")
 elif campaign_mode == "VIDEO_ONLY":
     st.subheader("VIDEO_ONLY")
     st.caption("Video-only direct landing mode.")

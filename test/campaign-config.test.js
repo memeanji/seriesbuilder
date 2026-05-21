@@ -9,10 +9,12 @@ import {
   buildBlogImageAdName,
   buildBlogMixedPlan,
   buildBlogVideoAdName,
+  buildImageOnlyCboPlan,
   buildVideoOnlyAdName,
   buildVideoOnlyAdsetName,
   buildVideoOnlyCboPlan,
   buildVideoOnlyPlan,
+  findImageFileByAdName,
   findVideoFileByAdName,
   formatBudgetForMetaInput,
   formatDryRunPlan,
@@ -523,6 +525,35 @@ test('VIDEO_ONLY_CBO uses explicit campaign, adset, and ad names from env', asyn
   assert.equal(plan.adsets[0].name, 'My exact adset name');
   assert.equal(plan.adsets[0].ads[0].name, 'custom_ad_1');
   assert.equal(path.basename(plan.adsets[0].ads[0].assetPath), 'custom_ad_1.mp4');
+});
+
+test('IMAGE_ONLY_CBO matches exact image filename and builds image CBO plan', async () => {
+  assert.equal(normalizeCampaignMode('IMAGE_ONLY_CBO_CAMPAIGN'), CAMPAIGN_MODES.IMAGE_ONLY_CBO);
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'image-cbo-plan-'));
+  const folder = path.join(root, 'images');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(path.join(folder, 'f_i_b_o_l_0520_1.webp'), '');
+  await fs.writeFile(path.join(folder, 'f_i_b_o_l_0520_2.jpg'), '');
+
+  assert.equal(path.basename(await findImageFileByAdName('f_i_b_o_l_0520_1', './images', { baseDir: root })), 'f_i_b_o_l_0520_1.webp');
+
+  const plan = await buildImageOnlyCboPlan({
+    CAMPAIGN_MODE: 'IMAGE_ONLY_CBO',
+    CAMPAIGN_NAME: '0520 image CBO campaign',
+    CAMPAIGN_BUDGET: '25000',
+    ADSET_COUNT: '0',
+    AD_CREATIVE_COUNT: '1',
+    IMAGE_ONLY_CBO_IMAGE_FOLDER: './images',
+    IMAGE_ONLY_CBO_LANDING_URL_1: 'https://example.com/1',
+    IMAGE_ONLY_CBO_LANDING_URL_2: 'https://example.com/2',
+  }, { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.mode, CAMPAIGN_MODES.IMAGE_ONLY_CBO);
+  assert.equal(plan.campaignBudget, '25,000');
+  assert.equal(plan.adsets[0].ads[0].type, 'image');
+  assert.equal(plan.adsets[0].ads[0].name, 'f_i_b_o_l_0520_1');
+  assert.equal(path.basename(plan.adsets[0].ads[1].assetPath), 'f_i_b_o_l_0520_2.jpg');
+  assert.equal(plan.adsets[0].ads[1].landingUrl, 'https://example.com/2');
 });
 
 test('IMAGE_ONLY validation is not blocked by VIDEO_ONLY_CBO requirements', async () => {

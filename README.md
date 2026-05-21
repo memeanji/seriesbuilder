@@ -2,12 +2,13 @@
 
 Playwright와 기존 Chrome CDP 세션을 사용해 Meta Ads Manager 화면을 자동 조작합니다.
 
-현재 프로그램은 세 가지 캠페인 모드를 지원합니다.
+현재 프로그램은 여러 캠페인 모드를 지원합니다.
 
 - `IMAGE_ONLY`: 기존 이미지 전용 흐름입니다. `CAMPAIGN_MODE`를 비워두거나 `IMAGE_ONLY`로 두면 기존 방식으로 동작합니다.
 - `BLOG_MIXED`: 블로그 캠페인용 흐름입니다. 광고세트 1개당 이미지 광고 4개와 동영상 광고 1개를 구성합니다.
 - `VIDEO_ONLY`: 동영상 직접랜딩 캠페인용 흐름입니다. 동영상 광고만 만들고 광고명 기준으로 직접랜딩 URL을 자동 생성합니다.
 - `VIDEO_ONLY_CBO`: 영상 only CBO 캠페인 생성 흐름입니다. 새 판매 캠페인을 만들고 캠페인명, 캠페인 예산, 광고세트/광고명, 랜딩 URL, 영상 파일을 순서대로 입력합니다.
+- `IMAGE_ONLY_CBO`: 이미지 only CBO 캠페인 생성 흐름입니다. `VIDEO_ONLY_CBO`와 같은 CBO 생성 흐름을 쓰되 크리에이티브 설정에서 이미지 광고를 선택하고 광고명과 같은 이미지 파일을 업로드합니다.
 
 ## VIDEO_ONLY_CBO 모드
 
@@ -39,6 +40,30 @@ f_v_b_o_l_0521_1
 - `.mp4`
 - `.mov`
 - `.m4v`
+
+## IMAGE_ONLY_CBO 모드
+
+`IMAGE_ONLY_CBO` 모드에서는 모든 광고가 이미지 광고로 생성됩니다. Streamlit에서 캠페인명, 캠페인 예산, 이미지 파일 폴더, 광고별 랜딩 URL을 입력합니다.
+
+이미지 파일명 규칙은 광고명과 이미지 파일명 stem이 정확히 같아야 합니다.
+
+예:
+
+```text
+광고명:
+f_i_b_o_l_0521_1
+
+이미지 파일:
+./assets/images/f_i_b_o_l_0521_1.png
+```
+
+지원 확장자:
+
+- `.png`
+- `.jpg`
+- `.jpeg`
+- `.webp`
+- `.gif`
 
 파일이 없으면 다음 형태로 중단됩니다.
 
@@ -88,7 +113,7 @@ Streamlit UI에서 할 수 있는 일:
 - `git pull origin main`
 - `npm install`
 - `.env` 저장 및 VS Code로 열기
-- 캠페인 모드 선택: `BLOG_MIXED`, `IMAGE_ONLY`, `VIDEO_ONLY_CBO`
+- 캠페인 모드 선택: `BLOG_MIXED`, `IMAGE_ONLY`, `VIDEO_ONLY_CBO`, `IMAGE_ONLY_CBO`
 - 캠페인 모드에 맞는 입력값 표시
 - 실행 전 dry-run 및 preview 확인
 - Chrome CDP 실행
