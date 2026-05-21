@@ -314,6 +314,10 @@ test('VIDEO_ONLY naming and landing URL use MMDD ad index', () => {
     getVideoOnlyLandingUrl('f_v_o_l_0520_3'),
     'https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_0520_3',
   );
+  assert.equal(
+    getVideoOnlyLandingUrl('f_v_o_l_0520_3', { LANDING_PATH_NUMBER: '99' }),
+    'https://repurely.com/surl/P/99?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_0520_3',
+  );
 });
 
 test('VIDEO_ONLY plan reads videos from YYMMDD TikTok folder', async () => {
@@ -330,6 +334,7 @@ test('VIDEO_ONLY plan reads videos from YYMMDD TikTok folder', async () => {
     CAMPAIGN_NAME: 'Video campaign',
     ADSET_COUNT: '1',
     AD_CREATIVE_COUNT: '1',
+    LANDING_PATH_NUMBER: '67',
     DATE_FORMAT: 'MMDD',
     VIDEO_ONLY_ASSET_ROOT: './desktop',
   };
@@ -349,7 +354,7 @@ test('VIDEO_ONLY plan reads videos from YYMMDD TikTok folder', async () => {
   assert.equal(plan.adsets[0].name, '0520 직접랜딩 광고세트 -1');
   assert.deepEqual(plan.adsets[0].ads.map((ad) => ad.name), ['f_v_o_l_0520_1', 'f_v_o_l_0520_2']);
   assert.deepEqual(plan.adsets[1].ads.map((ad) => ad.name), ['f_v_o_l_0520_3', 'f_v_o_l_0520_4']);
-  assert.equal(plan.adsets[1].ads[1].landingUrl, 'https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_0520_4');
+  assert.equal(plan.adsets[1].ads[1].landingUrl, 'https://repurely.com/surl/P/67?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_0520_4');
 });
 
 test('VIDEO_ONLY plan reads videos from CBO child folder inside TikTok folder', async () => {

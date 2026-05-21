@@ -165,8 +165,13 @@ export function buildVideoOnlyAdsetName(adsetIndex, env = process.env, date = ne
   return includeIndex ? `${today} 직접랜딩 광고세트 -${adsetIndex}` : `${today} 직접랜딩 광고세트`;
 }
 
-export function getVideoOnlyLandingUrl(adName) {
-  return `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${adName}`;
+function getLandingPathNumber(env = process.env) {
+  const value = String(env.LANDING_PATH_NUMBER || env.REPURELY_PATH_NUMBER || '100').trim();
+  return /^\d+$/.test(value) ? value : '100';
+}
+
+export function getVideoOnlyLandingUrl(adName, env = process.env) {
+  return `https://repurely.com/surl/P/${getLandingPathNumber(env)}?utm_source=f&utm_medium=f&utm_campaign=${adName}`;
 }
 
 export function getVideoOnlyCboLandingUrl(adIndex, adName, env = process.env) {
@@ -177,7 +182,7 @@ export function getVideoOnlyCboLandingUrl(adIndex, adName, env = process.env) {
     ''
   ).trim();
   if (value) return value;
-  if (parseBoolean(env.VIDEO_ONLY_CBO_AUTO_LANDING_URL)) return getVideoOnlyLandingUrl(adName);
+  if (parseBoolean(env.VIDEO_ONLY_CBO_AUTO_LANDING_URL)) return getVideoOnlyLandingUrl(adName, env);
   throw new Error(`Missing VIDEO_ONLY_CBO_LANDING_URL_${adIndex}. VIDEO_ONLY_CBO requires one landing URL per ad.`);
 }
 
@@ -189,7 +194,7 @@ export function getImageOnlyCboLandingUrl(adIndex, adName, env = process.env) {
     ''
   ).trim();
   if (value) return value;
-  if (parseBoolean(env.IMAGE_ONLY_CBO_AUTO_LANDING_URL)) return getVideoOnlyLandingUrl(adName);
+  if (parseBoolean(env.IMAGE_ONLY_CBO_AUTO_LANDING_URL)) return getVideoOnlyLandingUrl(adName, env);
   throw new Error(`Missing IMAGE_ONLY_CBO_LANDING_URL_${adIndex}. IMAGE_ONLY_CBO requires one landing URL per ad.`);
 }
 
@@ -760,7 +765,7 @@ export async function buildVideoOnlyPlan(env = process.env, options = {}) {
         throw new Error(`VIDEO_ONLY asset not found for ad ${adName}. Expected a video file named ${adName}.mp4/.mov/.m4v/.webm.`);
       }
       plannedAssets.push(assetPath);
-      const landingUrl = getVideoOnlyLandingUrl(adName);
+      const landingUrl = getVideoOnlyLandingUrl(adName, env);
       ads.push({
         type: 'video',
         index: globalAdIndex,

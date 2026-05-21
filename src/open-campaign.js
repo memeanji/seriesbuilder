@@ -255,6 +255,15 @@ function getLandingCampaignName(adName) {
   return String(adName).replace(/_(\d+)$/, (_, index) => `_${Number(index)}`);
 }
 
+function getLandingPathNumber() {
+  const value = String(process.env.LANDING_PATH_NUMBER || process.env.REPURELY_PATH_NUMBER || '100').trim();
+  return /^\d+$/.test(value) ? value : '100';
+}
+
+function buildRepurelyLandingUrl(adName) {
+  return `https://repurely.com/surl/P/${getLandingPathNumber()}?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(adName)}`;
+}
+
 function parseScheduleTime(value) {
   const m = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
   if (!m) return { hour: 5, minute: 0 };
@@ -3285,7 +3294,7 @@ async function completeMediaPickerNextAndOriginalFlow(page, adFormat = 'image') 
 }
 
 async function fillLandingUrlOnly(page, targetAdName, landingUrl = '') {
-  const targetUrl = landingUrl || `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(targetAdName)}`;
+  const targetUrl = landingUrl || buildRepurelyLandingUrl(targetAdName);
 
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     console.log(`[STEP] landing URL input search attempt ${attempt}/6`);

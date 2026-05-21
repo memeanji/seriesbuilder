@@ -58,6 +58,7 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
         f"ADSET_DAILY_BUDGET={values.get('ADSET_DAILY_BUDGET', '100000')}",
         f"CDP_URL={values.get('CDP_URL', 'http://127.0.0.1:9222')}",
         f"SCHEDULE_TIME={values.get('SCHEDULE_TIME', '05:00')}",
+        f"LANDING_PATH_NUMBER={values.get('LANDING_PATH_NUMBER', '100')}",
         "",
         f"ENABLE_DESKTOP_ALERT={values.get('ENABLE_DESKTOP_ALERT', NOTIFICATION_DEFAULTS['ENABLE_DESKTOP_ALERT'])}",
         f"NOTIFY_ON_SUCCESS={values.get('NOTIFY_ON_SUCCESS', NOTIFICATION_DEFAULTS['NOTIFY_ON_SUCCESS'])}",
@@ -269,8 +270,22 @@ def build_image_only_cbo_adset_name(index: int) -> str:
     return f"{mmdd} CBO 광고세트 -{index}"
 
 
-def default_landing_url(ad_name: str) -> str:
-    return f"https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign={ad_name}"
+def default_landing_url(ad_name: str, path_number: str = "100") -> str:
+    path = str(path_number or "100").strip()
+    if not path.isdigit():
+        path = "100"
+    return f"https://repurely.com/surl/P/{path}?utm_source=f&utm_medium=f&utm_campaign={ad_name}"
+
+
+def landing_url_value(env: dict[str, str], key: str, ad_name: str, path_number: str) -> str:
+    current = env.get(key, "").strip()
+    if not current:
+        return default_landing_url(ad_name, path_number)
+    repurely_pattern = re.compile(r"^https://repurely\.com/surl/P/\d+\?utm_source=f&utm_medium=f&utm_campaign=([^&]+)$")
+    match = repurely_pattern.match(current)
+    if match and match.group(1) == ad_name:
+        return default_landing_url(ad_name, path_number)
+    return current
 
 
 def find_video_file_for_preview(ad_name: str, folder: str) -> tuple[str, list[str]]:
@@ -353,8 +368,10 @@ def validate_form(values: dict[str, str]) -> list[str]:
         for index in range(1, adset_count + 1):
             if not values.get(f"BLOG_LANDING_URL_{index}", "").strip():
                 errors.append(f"BLOG_LANDING_URL_{index} is required.")
-    elif values.get("CAMPAIGN_MODE") == "IMAGE_ONLY" and values.get("IMAGE_ONLY_UPLOAD_MODE") != "LEGACY":
-        if not (values.get("IMAGE_ONLY_ASSET_ROOT", "").strip() or values.get("MEDIA_FOLDER_PATH", "").strip()):
+    elif values.get("CAMPAIGN_MODE") == "IMAGE_ONLY":
+        if not str(values.get("LANDING_PATH_NUMBER", "100")).strip().isdigit():
+            errors.append("LANDING_PATH_NUMBER must be a positive number.")
+        if values.get("IMAGE_ONLY_UPLOAD_MODE") != "LEGACY" and not (values.get("IMAGE_ONLY_ASSET_ROOT", "").strip() or values.get("MEDIA_FOLDER_PATH", "").strip()):
             errors.append("IMAGE_ONLY per-ad upload requires IMAGE_ONLY_ASSET_ROOT or MEDIA_FOLDER_PATH.")
     elif values.get("CAMPAIGN_MODE") == "VIDEO_ONLY":
         if not values.get("VIDEO_ONLY_ASSET_ROOT", "").strip():
@@ -368,6 +385,8 @@ def validate_form(values: dict[str, str]) -> list[str]:
         budget_preview = format_budget_preview(values.get("CAMPAIGN_BUDGET", ""))
         if not budget_preview:
             errors.append(f"Campaign budget must be a positive integer for {mode}.")
+        if not str(values.get("LANDING_PATH_NUMBER", "100")).strip().isdigit():
+            errors.append("LANDING_PATH_NUMBER must be a positive number.")
         media_folder = values.get(folder_key, "").strip()
         if not media_folder:
             errors.append(f"{folder_label} is required for {mode}.")
@@ -520,6 +539,7 @@ next_env: dict[str, str] = {
     "ADSET_DAILY_BUDGET": daily_budget,
     "CDP_URL": cdp_url,
     "SCHEDULE_TIME": schedule_time,
+    "LANDING_PATH_NUMBER": env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")),
     "ENABLE_DESKTOP_ALERT": str(enable_desktop_alert).lower(),
     "NOTIFY_ON_SUCCESS": str(notify_on_success).lower(),
     "NOTIFY_ON_ERROR": str(notify_on_error).lower(),
@@ -602,6 +622,13 @@ elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
     st.subheader(campaign_mode)
     st.caption(f"{media_label}-only CBO campaign creation mode.")
     campaign_budget = st.text_input("Campaign budget", value=env.get("CAMPAIGN_BUDGET", "25000"))
+    landing_path_number = st.number_input(
+        "Repurely path number",
+        min_value=1,
+        max_value=999999,
+        value=int(env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")) or "100"),
+        help="랜딩 URL의 /surl/P/{숫자} 부분입니다. 예: 99 입력 -> https://repurely.com/surl/P/99?...",
+    )
     media_count = st.number_input(
         f"{media_label} ad count",
         min_value=1,
@@ -611,6 +638,7 @@ elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
     )
     media_folder = st.text_input(f"{media_label} file folder", value=env.get(folder_key, "./assets/images" if is_image_cbo else "./assets/videos"))
     next_env["CAMPAIGN_BUDGET"] = campaign_budget
+    next_env["LANDING_PATH_NUMBER"] = str(landing_path_number)
     next_env["ADSET_COUNT"] = "0"
     next_env["AD_CREATIVE_COUNT"] = str(int(media_count) - 1)
     next_env[folder_key] = media_folder
@@ -642,7 +670,7 @@ elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
         next_env[ad_name_key] = ad_name
         media_file, expected = (find_image_file_for_preview(ad_name, media_folder) if is_image_cbo else find_video_file_for_preview(ad_name, media_folder))
         landing_key = f"{mode_prefix}_LANDING_URL_{ad_index}"
-        default_url = env.get(landing_key, default_landing_url(ad_name))
+        default_url = landing_url_value(env, landing_key, ad_name, str(landing_path_number))
         landing_url = st.text_input(f"{ad_name} landing URL", value=default_url, key=landing_key)
         next_env[landing_key] = landing_url
         if not media_file or not landing_url.strip():
@@ -668,6 +696,13 @@ elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
 elif campaign_mode == "VIDEO_ONLY":
     st.subheader("VIDEO_ONLY")
     st.caption("Video-only direct landing mode.")
+    landing_path_number = st.number_input(
+        "Repurely path number",
+        min_value=1,
+        max_value=999999,
+        value=int(env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")) or "100"),
+        help="랜딩 URL의 /surl/P/{숫자} 부분입니다. utm_campaign 값은 광고명으로 유지됩니다.",
+    )
     video_count = st.number_input(
         "Video ad count",
         min_value=1,
@@ -675,6 +710,7 @@ elif campaign_mode == "VIDEO_ONLY":
         value=int(env.get("AD_CREATIVE_COUNT", "1") or "1"),
         help="기존 VIDEO_ONLY 흐름에서는 이 값이 복제 기준으로 저장되어 실제 영상 광고는 입력값 + 1개로 구성됩니다. 예: 1 입력 -> 실제 2개.",
     )
+    next_env["LANDING_PATH_NUMBER"] = str(landing_path_number)
     video_root = st.text_input("Video asset root", value=env.get("VIDEO_ONLY_ASSET_ROOT", default_video_root()))
     next_env["AD_CREATIVE_COUNT"] = str(video_count)
     next_env["VIDEO_ONLY_ASSET_ROOT"] = video_root
@@ -693,10 +729,17 @@ elif campaign_mode == "VIDEO_ONLY":
 
     with st.expander("Landing URL pattern", expanded=True):
         mmdd = datetime.now().strftime("%m%d")
-        st.write(f"`https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_{mmdd}_1`")
-        st.write(f"`https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=f_v_o_l_{mmdd}_2`")
+        st.write(f"`{default_landing_url(f'f_v_o_l_{mmdd}_1', str(landing_path_number))}`")
+        st.write(f"`{default_landing_url(f'f_v_o_l_{mmdd}_2', str(landing_path_number))}`")
 else:
     st.subheader("IMAGE_ONLY")
+    landing_path_number = st.number_input(
+        "Repurely path number",
+        min_value=1,
+        max_value=999999,
+        value=int(env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")) or "100"),
+        help="랜딩 URL의 /surl/P/{숫자} 부분입니다. utm_campaign 값은 광고명으로 유지됩니다.",
+    )
     creative_count = st.number_input(
         "Image ad count",
         min_value=1,
@@ -704,6 +747,7 @@ else:
         value=int(env.get("AD_CREATIVE_COUNT", "4") or "4"),
         help="기존 IMAGE_ONLY 흐름에서는 이 값이 복제 기준으로 저장되어 실제 이미지 광고는 입력값 + 1개로 구성됩니다. 예: 4 입력 -> 실제 5개.",
     )
+    next_env["LANDING_PATH_NUMBER"] = str(landing_path_number)
     per_ad_upload = st.checkbox(
         "Upload one image per ad",
         value=env.get("IMAGE_ONLY_UPLOAD_MODE", "PER_AD").upper() != "LEGACY",
