@@ -487,6 +487,8 @@ async function clickRealCreateButton(page) {
     console.log('[STEP] CBO initial create already clicked - skipping duplicate create click');
     return;
   }
+  const timeoutMs = 10_000;
+  const startedAt = Date.now();
   const exactText = /^만들기$/;
   const preferredCandidates = [
     { name: 'role button exact 만들기', locator: page.getByRole('button', { name: exactText }).first() },
@@ -500,37 +502,43 @@ async function clickRealCreateButton(page) {
     },
   ];
 
-  for (const candidate of preferredCandidates) {
-    const visible = await candidate.locator.isVisible({ timeout: 2500 }).catch(() => false);
-    if (!visible) continue;
-    const text = (await candidate.locator.innerText().catch(() => '')).trim();
-    const box = await candidate.locator.boundingBox().catch(() => null);
-    console.log('[DEBUG] create campaign button candidate:', { name: candidate.name, text, box });
-    if (text.includes('보기 만들기') || text !== '만들기' || !box) continue;
-    await candidate.locator.click({ force: true }).catch(async () => {
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    });
-    console.log('[STEP] create button clicked');
-    return;
-  }
-
-  const createCandidates = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli');
-  const count = await createCandidates.count();
-
-  for (let i = 0; i < count; i += 1) {
-    const candidate = createCandidates.nth(i);
-    const text = (await candidate.innerText().catch(() => '')).trim();
-    const box = await candidate.boundingBox().catch(() => null);
-    console.log('[DEBUG] create button candidate:', { index: i, text, box });
-
-    if (text !== '만들기') continue;
-    if (text.includes('보기 만들기')) continue;
-    if (!box) continue;
-
-    if (box.x < 300 && box.y > 150 && box.y < 300) {
-      await candidate.click();
+  for (let attempt = 1; Date.now() - startedAt < timeoutMs; attempt += 1) {
+    for (const candidate of preferredCandidates) {
+      const visible = await candidate.locator.isVisible({ timeout: 1000 }).catch(() => false);
+      if (!visible) continue;
+      const text = (await candidate.locator.innerText().catch(() => '')).trim();
+      const box = await candidate.locator.boundingBox().catch(() => null);
+      console.log('[DEBUG] create campaign button candidate:', { attempt, name: candidate.name, text, box });
+      if (text.includes('보기 만들기') || text !== '만들기' || !box) continue;
+      await candidate.locator.click({ force: true }).catch(async () => {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+      console.log('[STEP] create button clicked');
       return;
     }
+
+    const createCandidates = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli');
+    const count = await createCandidates.count();
+
+    for (let i = 0; i < count; i += 1) {
+      const candidate = createCandidates.nth(i);
+      const text = (await candidate.innerText().catch(() => '')).trim();
+      const box = await candidate.boundingBox().catch(() => null);
+      console.log('[DEBUG] create button candidate:', { attempt, index: i, text, box });
+
+      if (text !== '만들기') continue;
+      if (text.includes('보기 만들기')) continue;
+      if (!box) continue;
+
+      if (box.x < 300 && box.y > 150 && box.y < 300) {
+        await candidate.click();
+        console.log('[STEP] create button clicked');
+        return;
+      }
+    }
+
+    console.log(`[WAIT] 좌측 상단 +만들기 버튼 검색 재시도 ${attempt}`);
+    await page.waitForTimeout(500);
   }
 
   throw new Error('좌측 상단 실제 +만들기 버튼을 찾지 못했습니다.');
