@@ -119,6 +119,15 @@ function buildNotificationDetail(extra = {}) {
   return lines.join('\n');
 }
 
+function summarizeErrorReason(error) {
+  const raw = String(error?.message || error || '').replace(/\x1b\[[0-9;]*m/g, '').trim();
+  const firstMeaningfulLine = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line && !/^Call log:?$/i.test(line) && !/^- /.test(line));
+  return firstMeaningfulLine || '자세한 내용은 터미널 로그를 확인해 주세요.';
+}
+
 async function safeScreenshot(page, screenshotPath, label, options = {}) {
   if (!ENABLE_SCREENSHOTS) {
     console.log('[STEP] screenshot disabled:', { label, path: screenshotPath });
@@ -3907,12 +3916,13 @@ async function main() {
       error_message: error.message,
       summary_log: summaryLogPath,
     });
+    const reason = summarizeErrorReason(error);
     if (status === 'video_upload_timeout') {
-      await notifyVideoUploadTimeout('영상 업로드가 제한 시간 안에 완료되지 않아 작업이 중단되었습니다.', detail);
+      await notifyVideoUploadTimeout('🚨 오류가 발생했습니다!', `원인: 영상 업로드가 제한 시간 안에 완료되지 않았습니다.\n${detail}`);
     } else if (status === 'stop') {
-      await notifyStop('입력값 검증 또는 안전 제한으로 작업이 중단되었습니다.', detail);
+      await notifyStop('🚨 오류가 발생했습니다!', `원인: 입력값 검증 또는 안전 제한으로 작업이 중단되었습니다.\n${detail}`);
     } else {
-      await notifyError('Meta 광고 자동화 중 에러가 발생했습니다.', detail);
+      await notifyError('🚨 오류가 발생했습니다!', `원인: ${reason}\n${detail}`);
     }
     throw error;
   } finally {

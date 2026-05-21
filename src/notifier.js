@@ -139,7 +139,7 @@ export function classifyAutomationError(error) {
   if (/Video upload completion was not confirmed|video upload ambiguous|60s|upload timeout|업로드.*60초|업로드 지연/i.test(message)) {
     return 'video_upload_timeout';
   }
-  if (/validation|validate|CAMPAIGN_|ADSET_|LANDING_URL|Video file not found|requires|must be|누락|검증|limit guard|안전 한도/i.test(message)) {
+  if (/validation|validate|CAMPAIGN_|ADSET_|LANDING_URL|Video file not found|requires|must be|누락|검증|limit guard|안전 제한/i.test(message)) {
     return 'stop';
   }
   return 'error';
