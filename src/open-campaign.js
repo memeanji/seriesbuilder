@@ -3579,18 +3579,53 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       }
 
       if (shouldRenameAdsetRow) {
-        await page.mouse.click(rowBox.x + rowBox.width / 2, rowBox.y + rowBox.height / 2);
+        const nameCell = await row
+          .$('[id^="default-button-for-action-menu_"], span._3dfi._3dfj')
+          .catch(() => null);
+        const nameCellBox = await nameCell?.boundingBox().catch(() => null);
+        if (nameCellBox) {
+          console.log('[DEBUG] adset name cell click:', {
+            targetAdsetName,
+            rowText: rowText.slice(0, 160),
+            nameCellBox,
+          });
+          await page.mouse.click(nameCellBox.x + Math.min(nameCellBox.width / 2, 180), nameCellBox.y + nameCellBox.height / 2);
+        } else {
+          console.log('[DEBUG] adset row fallback click:', {
+            targetAdsetName,
+            rowText: rowText.slice(0, 160),
+            rowBox,
+          });
+          await page.mouse.click(rowBox.x + Math.min(rowBox.width / 2, 220), rowBox.y + rowBox.height / 2);
+        }
         await page.waitForTimeout(7000);
 
-        const adsetInput = page.locator('input[placeholder="여기에 광고 세트 이름을 입력하세요..."], input[placeholder="광고 세트 이름 지정"]').first();
-        const visible = await adsetInput.isVisible({ timeout: 5000 }).catch(() => false);
-        if (visible) {
-          await adsetInput.click({ force: true });
+        const directAdsetInput = page.locator('input[placeholder="여기에 광고 세트 이름을 입력하세요..."], input[placeholder="광고 세트 이름 지정"]').first();
+        const directVisible = await directAdsetInput.isVisible({ timeout: 5000 }).catch(() => false);
+        const adsetInputHandle = directVisible
+          ? await directAdsetInput.elementHandle()
+          : await findVideoCboAdsetNameInputHandle(page, targetAdsetName);
+        if (adsetInputHandle) {
+          await adsetInputHandle.click({ force: true });
           await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
           await page.keyboard.press('Backspace');
           await page.keyboard.type(targetAdsetName, { delay: 60 });
           await page.waitForTimeout(5000);
-          const actualAdsetName = await adsetInput.inputValue().catch(() => '');
+          let actualAdsetName = await adsetInputHandle.evaluate((el) => el.value || '').catch(() => '');
+          if (!actualAdsetName.includes(targetAdsetName)) {
+            console.log('[DEBUG] adset rename keyboard fill mismatch - applying DOM fallback:', {
+              targetAdsetName,
+              actualAdsetName,
+            });
+            await adsetInputHandle.evaluate((el, value) => {
+              el.focus();
+              el.value = value;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }, targetAdsetName);
+            await page.waitForTimeout(1500);
+            actualAdsetName = await adsetInputHandle.evaluate((el) => el.value || '').catch(() => '');
+          }
           console.log('[STEP] adset name changed:', { targetAdsetName, actualAdsetName });
           if (!actualAdsetName.includes(targetAdsetName)) {
             throw new Error(`광고세트명 입력 확인 실패: expected=${targetAdsetName}, actual=${actualAdsetName}`);
