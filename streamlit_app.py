@@ -229,6 +229,11 @@ def expected_image_folder_name(adset_index: int, budget: str, creative_count: in
     return f"메타 리타겟 소재-{adset_index}번 세트-일예산 {budget_manwon}만원_익일 {hour}시 세팅"
 
 
+def build_image_only_ad_name(index: int) -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    return f"f_i_o_l_{mmdd}_{index}"
+
+
 def expected_video_folder_name() -> str:
     yymmdd = datetime.now().strftime("%y%m%d")
     return f"{yymmdd} 올레놀샷 틱톡세팅"
@@ -746,6 +751,17 @@ else:
         for index in range(1, image_effective_adset_count + 1):
             folder_name = detected_folder_names[index - 1] if index <= len(detected_folder_names) else expected_image_folder_name(index, daily_budget, int(creative_count) + 1, schedule_time)
             st.write(f"{index}. `{folder_name}`")
+    with st.expander("Landing URL examples", expanded=True):
+        actual_creative_count = int(creative_count) + 1
+        total_image_ads = image_effective_adset_count * actual_creative_count
+        st.caption("실제 자동화에서는 직접 입력 없이 광고명 기준으로 자동 생성됩니다.")
+        st.write(f"Landing URL pattern: `{default_landing_url('{ad_name}', str(landing_path_number))}`")
+        st.write(f"Total generated image URLs: `{total_image_ads}`")
+        for index in range(1, min(total_image_ads, 5) + 1):
+            ad_name = build_image_only_ad_name(index)
+            st.write(f"{index}. `{default_landing_url(ad_name, str(landing_path_number))}`")
+        if total_image_ads > 5:
+            st.caption(f"... plus {total_image_ads - 5} more")
     next_env["AD_CREATIVE_COUNT"] = str(creative_count)
     next_env["IMAGE_ONLY_UPLOAD_MODE"] = "PER_AD" if per_ad_upload else "LEGACY"
     next_env["IMAGE_ONLY_ASSET_ROOT"] = media_folder if per_ad_upload else ""
