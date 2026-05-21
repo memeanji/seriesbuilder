@@ -203,6 +203,21 @@ def expected_blog_folder_name(adset_index: int, budget: str, schedule_time: str)
     return f"{mmdd} {adset_index}번 광고세트-일예산 {budget_manwon}만원-이미지 4개 + 영상 1개 익일 {hour}시"
 
 
+def build_blog_adset_name(index: int) -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    return f"f_i_b_o_l_{mmdd}_{index}"
+
+
+def build_blog_image_ad_name(index: int) -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    return f"f_i_b_o_l_{mmdd}_{index}"
+
+
+def build_blog_video_ad_name(index: int) -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    return f"f_v_b_o_l_{mmdd}_{index}"
+
+
 def expected_image_folder_name(adset_index: int, budget: str, creative_count: int, schedule_time: str) -> str:
     budget_manwon = int(int(budget or "0") / 10000)
     hour = schedule_time.split(":", 1)[0].zfill(2)
@@ -472,9 +487,36 @@ if campaign_mode == "BLOG_MIXED":
             st.write(f"{index}. `{expected_blog_folder_name(index, daily_budget, schedule_time)}`")
 
     st.subheader("Landing URLs")
+    st.caption("VIDEO_ONLY_CBO preview처럼 확인하되, URL은 광고별이 아니라 광고세트 1개당 1개만 입력합니다.")
+    blog_preview_rows = []
     for index in range(1, int(adset_count) + 1):
         key = f"BLOG_LANDING_URL_{index}"
-        next_env[key] = st.text_input(f"Adset {index} landing URL", value=env.get(key, ""))
+        landing_url = st.text_input(f"Adset {index} landing URL", value=env.get(key, ""))
+        next_env[key] = landing_url
+        first_ad_index = ((index - 1) * 5) + 1
+        image_names = [build_blog_image_ad_name(first_ad_index + offset) for offset in range(4)]
+        video_name = build_blog_video_ad_name(first_ad_index + 4)
+        blog_preview_rows.append(
+            {
+                "adset_index": index,
+                "adset_name": build_blog_adset_name(index),
+                "landing_url": landing_url or "(missing)",
+                "image_ads": ", ".join(image_names),
+                "video_ad": video_name,
+                "expected_folder": expected_blog_folder_name(index, daily_budget, schedule_time),
+            }
+        )
+
+    with st.expander("BLOG_MIXED preview / validation", expanded=True):
+        st.write(f"Campaign name: `{campaign_name or '(missing)'}`")
+        st.write(f"Adset count: `{adset_count}`")
+        st.write(f"Blog asset root: `{blog_root}`")
+        st.dataframe(blog_preview_rows, use_container_width=True)
+        missing_urls = [row["adset_index"] for row in blog_preview_rows if row["landing_url"] == "(missing)"]
+        if missing_urls:
+            st.error(f"Landing URL missing for adset(s): {', '.join(map(str, missing_urls))}")
+        else:
+            st.success("All adset landing URLs are ready.")
 elif campaign_mode == "VIDEO_ONLY_CBO":
     st.subheader("VIDEO_ONLY_CBO")
     st.caption("Video-only CBO campaign creation mode.")
