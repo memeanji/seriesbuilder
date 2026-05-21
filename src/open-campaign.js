@@ -3168,13 +3168,27 @@ async function fillLandingUrlOnly(page, targetAdName, landingUrl = '') {
 
     const landingVisible = await landingInput.isVisible({ timeout: 5000 }).catch(() => false);
     if (landingVisible) {
-      console.log('[STEP] ?쒕뵫 URL ?낅젰 ?쒖옉');
+      console.log('[STEP] landing URL input started:', { targetAdName, targetUrl });
       await landingInput.click({ force: true });
       await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
       await page.keyboard.press('Backspace');
       await page.keyboard.type(targetUrl, { delay: 40 });
       await page.waitForTimeout(3000);
-      console.log('[STEP] ?쒕뵫 URL ?낅젰 ?꾨즺:', { targetUrl });
+      let actualUrl = await landingInput.inputValue().catch(() => '');
+      if (actualUrl !== targetUrl) {
+        await landingInput.evaluate((el, value) => {
+          el.focus();
+          el.value = value;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, targetUrl);
+        await page.waitForTimeout(1000);
+        actualUrl = await landingInput.inputValue().catch(() => '');
+      }
+      if (actualUrl !== targetUrl) {
+        throw new Error(`Landing URL fill failed: expected=${targetUrl}, actual=${actualUrl}`);
+      }
+      console.log('[STEP] landing URL input completed:', { targetAdName, targetUrl, actualUrl });
       return;
     }
 
@@ -3184,12 +3198,12 @@ async function fillLandingUrlOnly(page, targetAdName, landingUrl = '') {
 
     if (attempt === 3) {
       console.log('[WARN] 랜딩 URL input 미감지 - 크리에이티브 설정 재진입 후 재시도');
-      await openCreativeSettingsAndFillLandingUrl(page, targetAdName);
+      await openCreativeSettingsAndFillLandingUrl(page, targetAdName, targetUrl, AD_FORMAT);
       return;
     }
   }
 
-  throw new Error('?쒕뵫 URL input??李얠? 紐삵뻽?듬땲??');
+  throw new Error('Landing URL input not found.');
 }
 
 async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landingUrl = '', adFormat = AD_FORMAT) {
@@ -3267,15 +3281,29 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landing
   const landingInput = page.locator('input[placeholder="http://www.example.com/page"]').first();
   const landingVisible = await landingInput.isVisible({ timeout: 10000 }).catch(() => false);
   if (landingVisible) {
-    console.log('[STEP] ?쒕뵫 URL ?낅젰 ?쒖옉');
+    console.log('[STEP] landing URL input started after creative settings:', { targetAdName, targetUrl });
     await landingInput.click({ force: true });
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
     await page.keyboard.press('Backspace');
     await page.keyboard.type(targetUrl, { delay: 40 });
     await page.waitForTimeout(3000);
-    console.log('[STEP] ?쒕뵫 URL ?낅젰 ?꾨즺:', { targetUrl });
+    let actualUrl = await landingInput.inputValue().catch(() => '');
+    if (actualUrl !== targetUrl) {
+      await landingInput.evaluate((el, value) => {
+        el.focus();
+        el.value = value;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }, targetUrl);
+      await page.waitForTimeout(1000);
+      actualUrl = await landingInput.inputValue().catch(() => '');
+    }
+    if (actualUrl !== targetUrl) {
+      throw new Error(`Landing URL fill failed after creative settings: expected=${targetUrl}, actual=${actualUrl}`);
+    }
+    console.log('[STEP] landing URL input completed after creative settings:', { targetAdName, targetUrl, actualUrl });
   } else {
-    throw new Error('?쒕뵫 URL input??李얠? 紐삵뻽?듬땲??');
+    throw new Error('Landing URL input not found after creative settings.');
   }
 }
 
