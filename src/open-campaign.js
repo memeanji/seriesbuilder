@@ -245,7 +245,7 @@ function parseScheduleTime(value) {
 }
 
 function getAdsetName(index) {
-  return `${getTodayMMDD()} ${ADSET_BASE_NAME} ${index}踰?愿묎퀬?명듃`;
+  return `${getTodayMMDD()} ${ADSET_BASE_NAME} ${index}번 광고세트`;
 }
 
 async function ensureDirs() {
@@ -393,7 +393,7 @@ async function debugDump(page, reason) {
 async function ensureLoggedInOrThrow(page) {
   const currentUrl = page.url();
   if (/facebook\.com\/(login|checkpoint)/i.test(currentUrl)) {
-    throw new Error('濡쒓렇???붾㈃??媛먯??섏뿀?듬땲?? ?쇰컲 Chrome?먯꽌 Meta 濡쒓렇?????ㅼ떆 ?ㅽ뻾?댁＜?몄슂.');
+    throw new Error('Meta login page was detected. Please log in to Meta in Chrome, then run the automation again.');
   }
 }
 
@@ -401,16 +401,16 @@ async function trySearchBox(page, keyword) {
   const searchInput = page
     .locator('input[type="text"], input[type="search"], textarea')
     .filter({ hasNot: page.locator('[type="checkbox"], [role="switch"]') })
-    .filter({ hasNot: page.locator('[aria-label*="鍮좊Ⅸ 蹂닿린" i], [aria-label*="??? i]') })
+    .filter({ hasNot: page.locator('[aria-label*="빠른 보기" i], [aria-label*="검색" i]') })
     .first();
 
   const visible = await searchInput.isVisible({ timeout: 3000 }).catch(() => false);
   if (!visible) {
-    console.log('[STEP] 罹좏럹??寃?됱갹 誘멸컧吏 - 紐⑸줉?먯꽌 吏곸젒 ?먯깋');
+    console.log('[STEP] campaign search box not visible - searching directly from list');
     return false;
   }
 
-  console.log('[STEP] 罹좏럹??寃?됱갹 媛먯? - 寃?됱뼱 ?낅젰 ?쒕룄');
+  console.log('[STEP] campaign search box detected - entering search keyword');
   await searchInput.click();
   await searchInput.fill('');
   await searchInput.fill(keyword);
@@ -427,7 +427,7 @@ async function logCampaignCandidates(page, limit = 10) {
     const text = (await rows.nth(i).innerText().catch(() => '')).trim();
     if (text.length >= 2) candidates.push(text.split('\n')[0].trim());
   }
-  console.log('[DEBUG] ?붾㈃ 罹좏럹???꾨낫(理쒕? 10媛?:');
+  console.log('[DEBUG] visible campaign candidates (up to 10):');
   candidates.forEach((name, idx) => console.log(`  ${idx + 1}. ${name}`));
 }
 
@@ -953,7 +953,7 @@ async function ensureCampaignStructureRoot(page) {
   }
 
   await debugDump(page, 'campaign_structure_tree_root not found');
-  throw new Error('id="campaign_structure_tree_root"瑜?李얠? 紐삵뻽?듬땲??');
+  throw new Error('Could not find id="campaign_structure_tree_root".');
 }
 
 async function openCorrectAdActionMenu(page, adsetName) {
@@ -1599,7 +1599,7 @@ async function findCampaignBudgetInputHandle(page) {
       const placeholder = input.getAttribute('placeholder') || '';
       if (['checkbox', 'radio', 'hidden'].includes(type)) return false;
       if (/^(true|false)$/i.test(value)) return false;
-      return /湲덉븸|amount/i.test(placeholder) || /^[\d,]*$/.test(value);
+      return /금액|amount/i.test(placeholder) || /^[\d,]*$/.test(value);
     }).catch(() => false);
     if (!usable) return null;
     console.log('[DEBUG] campaign budget input selector matched:', selectorName);
@@ -2119,7 +2119,7 @@ async function selectVideoAdModeWithRequestedClasses(page) {
   }
 
   await debugDump(page, 'video ad button not clicked');
-  throw new Error('?숈쁺??愿묎퀬 踰꾪듉??李얘굅???대┃?섏? 紐삵뻽?듬땲??');
+  throw new Error('Could not find or click the video ad button.');
 }
 
 async function selectCreativeAdModeWithRequestedClasses(page, adFormat = AD_FORMAT) {
@@ -2189,15 +2189,15 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
 
   const uploadFolder = explicitFiles?.length ? path.dirname(explicitFiles[0]) : await findExactMediaFolder();
   if (!uploadFolder) {
-    throw new Error(`諛뷀깢?붾㈃?먯꽌 ?좎쭨 ?대?吏 ?대뜑瑜?李얠? 紐삵뻽?듬땲?? ${folderNames.join(', ')}`);
+    throw new Error(`Could not find the expected media folder on Desktop or configured media path. Expected folder names: ${folderNames.join(', ')}`);
   }
 
   const files = explicitFiles?.length ? explicitFiles : await collectUploadFiles(uploadFolder);
   if (!files.length) {
-    throw new Error(`?낅줈??媛?ν븳 ${adFormat} ?뚯씪???놁뒿?덈떎: ${uploadFolder}`);
+    throw new Error(`No uploadable ${adFormat} files found in: ${uploadFolder}`);
   }
 
-  console.log('[STEP] ?낅줈???대?吏 ?대뜑 ?좏깮:', {
+  console.log('[STEP] upload media folder selected:', {
     uploadFolder,
     targetAdName,
     adFormat,
@@ -2206,14 +2206,14 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
     files,
   });
 
-  console.log('[STEP] ?대?吏 愿묎퀬 ?대? - ?낅줈??踰꾪듉 ?먯깋 ?쒖옉');
+  console.log('[STEP] media creative area - searching upload button');
 
   const presentationArea = page
     .locator('div[role="presentation"].x3nfvp2.x120ccyz.x1heor9g.x2lah0s.x1c4vz4f')
     .first();
 
   const presentationVisible = await presentationArea.isVisible({ timeout: 30000 }).catch(() => false);
-  console.log('[DEBUG] ?대?吏 愿묎퀬 presentation ?곸뿭 ?쒖떆:', { presentationVisible });
+  console.log('[DEBUG] creative presentation area visible:', { presentationVisible });
   if (presentationVisible) {
     await presentationArea.scrollIntoViewIfNeeded().catch(() => null);
     await page.waitForTimeout(1500);
@@ -2250,7 +2250,7 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
   let uploadButton = null;
   let uploadBox = null;
   for (let attempt = 1; attempt <= 12 && !uploadButton; attempt += 1) {
-    console.log(`[STEP] ?낅줈??踰꾪듉 ?먯깋/?대┃ 以鍮?${attempt}/12`);
+    console.log(`[STEP] upload button search/click prep ${attempt}/12`);
     for (const candidate of uploadButtonCandidates) {
       const visible = await candidate.locator.isVisible({ timeout: 1500 }).catch(() => false);
       if (!visible) continue;
@@ -2258,7 +2258,7 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
       await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
       await page.waitForTimeout(700);
       const box = await candidate.locator.boundingBox().catch(() => null);
-      console.log('[DEBUG] ?낅줈??踰꾪듉 ?꾨낫:', { attempt, name: candidate.name, box });
+      console.log('[DEBUG] upload button candidate:', { attempt, name: candidate.name, box });
       if (!box) continue;
 
       uploadButton = candidate.locator;
@@ -2271,10 +2271,10 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
 
   if (!uploadButton) {
     await debugDump(page, 'upload button not found');
-    throw new Error('?낅줈??踰꾪듉??李얠? 紐삵뻽?듬땲??');
+    throw new Error('Could not find the upload button.');
   }
 
-  console.log('[DEBUG] ?낅줈??踰꾪듉 box:', uploadBox);
+  console.log('[DEBUG] upload button box:', uploadBox);
 
   const clickUploadButton = async () => uploadButton.click({ force: true }).catch(async () => {
     if (uploadBox) await page.mouse.click(uploadBox.x + uploadBox.width / 2, uploadBox.y + uploadBox.height / 2);
@@ -2301,7 +2301,7 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
   } else {
     await page.waitForTimeout(3000);
   }
-  console.log('[STEP] 諛뷀깢?붾㈃ ?좎쭨 ?대뜑 ?대?吏 ?꾩껜 ?낅줈???꾨즺:', {
+  console.log('[STEP] media upload completed:', {
     uploadFolder,
     fileCount: files.length,
   });
@@ -2373,10 +2373,10 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const exactNameRegex = new RegExp(`^${escapeRegex(targetAdName)}(\\.[a-z0-9]+)?$`, 'i');
 
-  console.log('[STEP] ?뺥솗???낅줈???대?吏 寃???좏깮 ?쒖옉:', { targetAdName });
+  console.log('[STEP] existing uploaded media search/select started:', { targetAdName });
 
   const mediaSearch = page
-    .locator('input[placeholder="誘몃뵒??寃??], input[placeholder*="誘몃뵒??], input[type="search"]')
+    .locator('input[placeholder="미디어 검색"], input[placeholder*="미디어"], input[type="search"]')
     .first();
 
   await mediaSearch.waitFor({ state: 'visible', timeout: 60000 });
@@ -2385,7 +2385,7 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
   await page.keyboard.press('Backspace');
   await page.keyboard.type(targetAdName, { delay: 40 });
   await page.waitForTimeout(8000);
-  console.log('[STEP] 湲곗〈 誘몃뵒???뺥솗 寃?됱뼱 ?낅젰:', { targetAdName });
+  console.log('[STEP] exact existing media search keyword entered:', { targetAdName });
   await page.waitForTimeout(7000);
 
   if (await clickVisibleMediaImageOnce(page, targetAdName)) {
@@ -2509,7 +2509,7 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
     await clickable.scrollIntoViewIfNeeded().catch(() => null);
     await page.waitForTimeout(2500);
     const box = await clickable.boundingBox().catch(() => null);
-    console.log('[DEBUG] ?뺥솗 ?뚯씪紐??쇱튂 誘몃뵒???꾨낫:', {
+    console.log('[DEBUG] exact media filename candidate:', {
       targetAdName,
       box,
       values: matchInfo.values,
@@ -2522,12 +2522,12 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
     await waitForOneMediaSelected(page, targetAdName);
-    console.log('[STEP] ?뺥솗???쇱튂?섎뒗 ?낅줈???대?吏 ?좏깮 ?꾨즺:', { targetAdName });
+    console.log('[STEP] exact uploaded media selected:', { targetAdName });
     await completeMediaPickerNextAndOriginalFlow(page);
     return;
   }
 
-  console.log('[WARN] 怨좊┰???뺥솗 ?뚯씪紐?移대뱶瑜?李얠? 紐삵븿 - ?뺥솗 寃??寃곌낵???ㅻ뒛 ?낅줈???꾨낫瑜??좏깮?⑸땲??', { targetAdName });
+  console.log('[WARN] exact filename media card not found - selecting the visible upload result fallback:', { targetAdName });
   const fallbackCandidates = [
     {
       name: 'first unchecked result checkbox',
@@ -2554,7 +2554,7 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
     await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
     await page.waitForTimeout(5000);
     const box = await candidate.locator.boundingBox().catch(() => null);
-    console.log('[DEBUG] ?ㅻ뒛 ?낅줈???대?吏 fallback ?좏깮 ?꾨낫:', { targetAdName, name: candidate.name, box });
+    console.log('[DEBUG] visible uploaded media fallback candidate:', { targetAdName, name: candidate.name, box });
     if (!box) continue;
 
     const clickableHandle = await candidate.locator.evaluateHandle((el) => (
@@ -2571,14 +2571,14 @@ async function searchAndSelectExistingMedia(page, targetAdName) {
     }
 
     await waitForOneMediaSelected(page, targetAdName);
-    console.log('[STEP] ?ㅻ뒛 ?낅줈???대?吏 fallback ?좏깮 ?꾨즺:', { targetAdName, candidate: candidate.name });
+    console.log('[STEP] visible uploaded media fallback selected:', { targetAdName, candidate: candidate.name });
     await completeMediaPickerNextAndOriginalFlow(page);
     return;
   }
 
-  console.log('[DEBUG] ?뺥솗 ?뚯씪紐?留ㅼ묶 ?ㅽ뙣 - 寃?ы븳 媛??섑뵆:', inspected.slice(0, 20));
+  console.log('[DEBUG] exact filename matching failed - inspected samples:', inspected.slice(0, 20));
   await debugDump(page, 'existing media not selected');
-  throw new Error(`?뺥솗???쇱튂?섎뒗 湲곗〈 ?낅줈???대?吏 寃???좏깮 ?ㅽ뙣: ${targetAdName}`);
+  throw new Error(`Failed to search/select existing uploaded media with exact filename: ${targetAdName}`);
 }
 
 async function waitForOneMediaSelected(page, targetAdName) {
@@ -2591,7 +2591,7 @@ async function waitForOneMediaSelected(page, targetAdName) {
   for (let attempt = 1; attempt <= 15; attempt += 1) {
     const selectedVisible = await selectedLabel.isVisible({ timeout: 2000 }).catch(() => false);
     const selectedText = selectedVisible ? await selectedLabel.innerText().catch(() => '') : '';
-    console.log('[DEBUG] 誘몃뵒??1媛??좏깮 ?뺤씤:', { targetAdName, attempt, selectedVisible, selectedText });
+    console.log('[DEBUG] one media selected check:', { targetAdName, attempt, selectedVisible, selectedText });
     if (selectedVisible) {
       await page.waitForTimeout(5000);
       return true;
@@ -2600,7 +2600,7 @@ async function waitForOneMediaSelected(page, targetAdName) {
   }
 
   await debugDump(page, 'one media selected label not found');
-  throw new Error(`?대?吏 ?좏깮 ??1媛??좏깮???곹깭瑜??뺤씤?섏? 紐삵뻽?듬땲?? ${targetAdName}`);
+  throw new Error(`Could not confirm that exactly one media item is selected: ${targetAdName}`);
 }
 
 async function isOneMediaSelected(page) {
@@ -2677,7 +2677,7 @@ async function clickVisibleMediaImageOnce(page, targetAdName) {
     return { found: targets.length > 0, target: targets[0] || null, count: targets.length };
   }).catch((error) => ({ found: false, error: error.message }));
 
-  console.log('[DEBUG] 蹂댁씠???대?吏 ?⑥닚 ?대┃ ?꾨낫:', { targetAdName, result });
+  console.log('[DEBUG] visible media simple click candidate:', { targetAdName, result });
   if (!result.found || !result.target) return false;
 
   const { box } = result.target;
@@ -2685,7 +2685,7 @@ async function clickVisibleMediaImageOnce(page, targetAdName) {
   await page.waitForTimeout(7000);
 
   if (await isOneMediaSelected(page)) {
-    console.log('[STEP] 蹂댁씠???대?吏 ?⑥닚 ?대┃ ?좏깮 ?꾨즺:', { targetAdName });
+    console.log('[STEP] visible media selected by simple click:', { targetAdName });
     return true;
   }
 
@@ -2715,16 +2715,16 @@ async function clickVisibleMediaImageOnce(page, targetAdName) {
   }
 
   for (const candidate of coordinateCandidates) {
-    console.log('[DEBUG] ?대?吏 醫뚰몴 ?꾨낫 ?대┃:', { targetAdName, candidate });
+    console.log('[DEBUG] media coordinate candidate click:', { targetAdName, candidate });
     await page.mouse.click(candidate.x, candidate.y);
     await page.waitForTimeout(5000);
     if (await isOneMediaSelected(page)) {
-      console.log('[STEP] ?대?吏 醫뚰몴 ?꾨낫 ?대┃ ?좏깮 ?꾨즺:', { targetAdName, candidate });
+      console.log('[STEP] media selected by coordinate candidate:', { targetAdName, candidate });
       return true;
     }
   }
 
-  console.log('[WARN] 蹂댁씠???대?吏 ?⑥닚 ?대┃ ???좏깮 誘명솗??', { targetAdName });
+  console.log('[WARN] visible media simple click did not confirm selection:', { targetAdName });
   return false;
 }
 
@@ -2799,7 +2799,7 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
     containerSelector: requestedContainerSelector,
   }).catch((error) => ({ found: false, error: error.message }));
 
-  console.log('[DEBUG] ?뚯씪紐?span 湲곕컲 誘몃뵒???꾨낫:', { targetAdName, result });
+  console.log('[DEBUG] filename span based media candidate:', { targetAdName, result });
   if (!result.found || !result.candidate) return false;
 
   const { box } = result.candidate;
@@ -2869,12 +2869,12 @@ async function clickMediaResultByNameSpanAndImage(page, targetAdName) {
       target: targetAdName,
       containerSelector: requestedContainerSelector,
     }).catch((error) => ({ ok: false, reason: error.message }));
-    console.log('[DEBUG] ?뚯씪紐?span ?대?吏 DOM 媛뺤젣 ?대┃ 寃곌낵:', { targetAdName, forced });
+    console.log('[DEBUG] filename span media DOM forced click result:', { targetAdName, forced });
     await page.waitForTimeout(7000);
   }
 
   await waitForOneMediaSelected(page, targetAdName);
-  console.log('[STEP] ?뚯씪紐?span ?뺤씤 ???대?吏 ?좏깮 ?꾨즺:', { targetAdName });
+  console.log('[STEP] filename span media selected:', { targetAdName });
   return true;
 }
 
@@ -2885,7 +2885,7 @@ async function clickMediaCandidateAndVerifySelected(page, locator, targetAdName,
   await locator.scrollIntoViewIfNeeded().catch(() => null);
   await page.waitForTimeout(5000);
   const box = await locator.boundingBox().catch(() => null);
-  console.log('[DEBUG] 誘몃뵒??紐낆떆 ?꾨낫:', { targetAdName, name, box });
+  console.log('[DEBUG] named media candidate:', { targetAdName, name, box });
   if (!box) return false;
 
   await locator.click({ force: true }).catch(async () => {
@@ -2893,7 +2893,7 @@ async function clickMediaCandidateAndVerifySelected(page, locator, targetAdName,
   });
   await page.waitForTimeout(7000);
   await waitForOneMediaSelected(page, targetAdName);
-  console.log('[STEP] 誘몃뵒??紐낆떆 ?꾨낫 ?좏깮 ?꾨즺:', { targetAdName, name });
+  console.log('[STEP] named media candidate selected:', { targetAdName, name });
   return true;
 }
 
@@ -2926,7 +2926,7 @@ async function clickRightmostMediaTileAndVerifySelected(page, selector, targetAd
 
   candidates.sort((a, b) => (b.box.x - a.box.x) || (a.box.y - b.box.y));
   const chosen = candidates[0];
-  console.log('[DEBUG] ?ㅻⅨ履???誘몃뵒??????좏깮 ?꾨낫:', {
+  console.log('[DEBUG] rightmost media tile candidate:', {
     targetAdName,
     chosenIndex: chosen.index,
     chosenBox: chosen.box,
@@ -2953,12 +2953,12 @@ async function clickRightmostMediaTileAndVerifySelected(page, selector, targetAd
         text: (clickable.textContent || '').trim().slice(0, 120),
       };
     }).catch((error) => ({ error: error.message }));
-    console.log('[DEBUG] 誘몃뵒?????DOM 媛뺤젣 ?대┃ 寃곌낵:', { targetAdName, forced });
+    console.log('[DEBUG] media tile DOM forced click result:', { targetAdName, forced });
     await page.waitForTimeout(7000);
   }
 
   await waitForOneMediaSelected(page, targetAdName);
-  console.log('[STEP] ?ㅻⅨ履???誘몃뵒??????좏깮 ?꾨즺:', { targetAdName });
+  console.log('[STEP] right-side media library item selected:', { targetAdName });
   return true;
 }
 
@@ -2999,14 +2999,14 @@ async function clickMediaPickerButton(page, buttonText, attemptLabel, dataSurfac
     await candidate.locator.scrollIntoViewIfNeeded().catch(() => null);
     await page.waitForTimeout(700);
     const box = await candidate.locator.boundingBox().catch(() => null);
-    console.log('[DEBUG] 誘몃뵒???좏깮 踰꾪듉 ?꾨낫:', { buttonText, attemptLabel, name: candidate.name, box });
+    console.log('[DEBUG] media picker button candidate:', { buttonText, attemptLabel, name: candidate.name, box });
     if (!box) continue;
 
     await candidate.locator.click({ force: true }).catch(async () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
     await page.waitForTimeout(1000);
-    console.log('[STEP] 誘몃뵒???좏깮 踰꾪듉 ?대┃ ?꾨즺:', { buttonText, attemptLabel, candidate: candidate.name });
+    console.log('[STEP] media picker button clicked:', { buttonText, attemptLabel, candidate: candidate.name });
     return true;
   }
 
@@ -3014,21 +3014,21 @@ async function clickMediaPickerButton(page, buttonText, attemptLabel, dataSurfac
 }
 
 async function clickMediaPickerNextButton(page, attemptLabel) {
-  return clickMediaPickerButton(page, '?ㅼ쓬', attemptLabel, 'ads-omp-primary-button');
+  return clickMediaPickerButton(page, '다음', attemptLabel, 'ads-omp-primary-button');
 }
 
 async function clickMediaPickerDoneButton(page, attemptLabel) {
-  return clickMediaPickerButton(page, '?꾨즺', attemptLabel, 'ads-omp-primary-button');
+  return clickMediaPickerButton(page, '완료', attemptLabel, 'ads-omp-primary-button');
 }
 
 async function clickMediaPickerSkipAndContinueButton(page, attemptLabel) {
-  const exactClicked = await clickMediaPickerButton(page, '嫄대꼫?곌퀬 怨꾩냽?섍린', attemptLabel, 'ads-omp-primary-button');
+  const exactClicked = await clickMediaPickerButton(page, '건너뛰고 계속하기', attemptLabel, 'ads-omp-primary-button');
   if (exactClicked) return true;
 
   const candidates = [
-    page.getByRole('button', { name: /嫄대꼫?곌퀬\s*怨꾩냽/i }).first(),
-    page.getByText(/嫄대꼫?곌퀬\s*怨꾩냽/i).first(),
-    page.locator('[role="button"]').filter({ hasText: /嫄대꼫?곌퀬\s*怨꾩냽/i }).first(),
+    page.getByRole('button', { name: /건너뛰고\s*계속/i }).first(),
+    page.getByText(/건너뛰고\s*계속/i).first(),
+    page.locator('[role="button"]').filter({ hasText: /건너뛰고\s*계속/i }).first(),
   ];
 
   for (const locator of candidates) {
@@ -3040,7 +3040,7 @@ async function clickMediaPickerSkipAndContinueButton(page, attemptLabel) {
       if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
     await page.waitForTimeout(1000);
-    console.log('[STEP] 嫄대꼫?곌퀬 怨꾩냽?섍린 踰꾪듉 ?대┃ ?꾨즺:', { attemptLabel });
+    console.log('[STEP] skip and continue button clicked:', { attemptLabel });
     return true;
   }
 
@@ -3065,7 +3065,7 @@ async function selectAllOriginalRadios(page) {
       await page.waitForTimeout(200);
     }
   }
-  console.log('[STEP] ?먮낯(original) ?쇰뵒???좏깮 ?꾨즺:', { selectedCount });
+  console.log('[STEP] original radio selection completed:', { selectedCount });
   return selectedCount;
 }
 
@@ -3084,19 +3084,19 @@ async function completeVideoMediaPickerFlow(page) {
   const selectedNext = await clickMediaPickerNextButton(page, 'video-after-media-select');
   if (!selectedNext) {
     await debugDump(page, 'next button not found after video media select');
-    throw new Error('?숈쁺???좏깮 ???ㅼ쓬 踰꾪듉??李얠? 紐삵뻽?듬땲??');
+    throw new Error('Could not find the Next button after selecting video media.');
   }
 
   const skipped = await clickMediaPickerSkipAndContinueButton(page, 'video-skip-processing');
   if (!skipped) {
     await debugDump(page, 'skip and continue button not found after video next');
-    throw new Error('?숈쁺???ㅼ쓬 ?④퀎 ??嫄대꼫?곌퀬 怨꾩냽?섍린 踰꾪듉??李얠? 紐삵뻽?듬땲??');
+    throw new Error('Could not find the Skip and continue button after video Next.');
   }
 
   await page.waitForTimeout(1000);
   await selectAllOriginalRadios(page);
   const originalStatus = await getOriginalRadioStatus(page);
-  console.log('[STEP] ?숈쁺??original 鍮꾩쑉 ?좏깮 ?곹깭 ?뺤씤:', {
+  console.log('[STEP] video original ratio selection status:', {
     total: originalStatus.length,
     checked: originalStatus.filter((radio) => radio.checked).length,
     originalStatus,
@@ -3105,17 +3105,17 @@ async function completeVideoMediaPickerFlow(page) {
   const cropNext = await clickMediaPickerNextButton(page, 'video-after-original');
   if (!cropNext) {
     await debugDump(page, 'next button not found after video original');
-    throw new Error('?숈쁺??original ?좏깮 ???ㅼ쓬 踰꾪듉??李얠? 紐삵뻽?듬땲??');
+    throw new Error('Could not find the Next button after selecting video original ratio.');
   }
 
   const doneClicked = await clickMediaPickerDoneButton(page, 'video-generation-complete');
   if (!doneClicked) {
     await debugDump(page, 'done button not found after video generation');
-    throw new Error('?숈쁺???앹꽦 ?④퀎 ?꾨즺 踰꾪듉??李얠? 紐삵뻽?듬땲??');
+    throw new Error('Could not find the Done button after video generation step.');
   }
 
   await page.waitForTimeout(1000);
-  console.log('[STEP] ?숈쁺???낅줈??嫄대꼫?곌린/original/?꾨즺 ?먮쫫 ?꾨즺');
+  console.log('[STEP] video upload skip/original/done flow completed');
 }
 
 async function completeMediaPickerNextAndOriginalFlow(page, adFormat = 'image') {
@@ -3127,7 +3127,7 @@ async function completeMediaPickerNextAndOriginalFlow(page, adFormat = 'image') 
   const selectedNext = await clickMediaPickerNextButton(page, 'after-media-select');
   if (!selectedNext) {
     await debugDump(page, 'next button not found after media select');
-    throw new Error('?대?吏 ?좏깮 ???ㅼ쓬 踰꾪듉??李얠? 紐삵뻽?듬땲??');
+    throw new Error('Could not find the Next button after selecting image media.');
   }
 
   await page.waitForTimeout(400);
@@ -3136,30 +3136,30 @@ async function completeMediaPickerNextAndOriginalFlow(page, adFormat = 'image') 
   const cropNext = await clickMediaPickerNextButton(page, 'after-original-crop');
   if (!cropNext) {
     await debugDump(page, 'next button not found after original crop');
-    throw new Error('?먮낯 ?먮Ⅴ湲??좏깮 ???ㅼ쓬 踰꾪듉??李얠? 紐삵뻽?듬땲??');
+    throw new Error('Could not find the Next button after original crop selection.');
   }
 
   const textNext = await clickMediaPickerNextButton(page, 'after-text-step');
   if (!textNext) {
     await debugDump(page, 'next button not found after text step');
-    throw new Error('臾멸뎄 ?④퀎 ?ㅼ쓬 踰꾪듉??李얠? 紐삵뻽?듬땲??');
+    throw new Error('Could not find the Next button after text step.');
   }
 
   const doneClicked = await clickMediaPickerDoneButton(page, 'image-generation-complete');
   if (!doneClicked) {
     await debugDump(page, 'done button not found after image generation');
-    throw new Error('?대?吏 ?앹꽦 ?④퀎 ?꾨즺 踰꾪듉??李얠? 紐삵뻽?듬땲??');
+    throw new Error('Could not find the Done button after image generation step.');
   }
 
   await page.waitForTimeout(500);
-  console.log('[STEP] ?대?吏 ?좏깮/?먮Ⅴ湲?臾멸뎄/?앹꽦 ?꾨즺 ?먮쫫 ?꾨즺');
+  console.log('[STEP] image select/original/text/done flow completed');
 }
 
 async function fillLandingUrlOnly(page, targetAdName, landingUrl = '') {
   const targetUrl = landingUrl || `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(targetAdName)}`;
 
   for (let attempt = 1; attempt <= 6; attempt += 1) {
-    console.log(`[STEP] ?쒕뵫 URL input ?먯깋 ?쒕룄 ${attempt}/6`);
+    console.log(`[STEP] landing URL input search attempt ${attempt}/6`);
     const landingInput = page
       .locator('input[placeholder="http://www.example.com/page"], input[placeholder*="example.com/page"]')
       .or(page.getByLabel(/웹사이트 URL|website url/i))
@@ -3192,7 +3192,7 @@ async function fillLandingUrlOnly(page, targetAdName, landingUrl = '') {
       return;
     }
 
-    // 吏곸젒 ?붾㈃?먯꽌 URL ?뱀뀡???몄텧?쒗궎湲??꾪븳 蹂댁젙
+    // Scroll to expose the URL section when it is not visible on the current screen.
     await page.mouse.wheel(0, 500);
     await page.waitForTimeout(2500);
 
@@ -3214,17 +3214,17 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landing
 
   let creativeOpened = false;
   for (let attempt = 1; attempt <= 10; attempt += 1) {
-    console.log(`[STEP] ?щ━?먯씠?곕툕 ?ㅼ젙 吏꾩엯 ?쒕룄 ${attempt}/10`);
+    console.log(`[STEP] creative settings entry attempt ${attempt}/10`);
     const creativeVisible = await creativeSettings.isVisible({ timeout: 10000 }).catch(() => false);
     if (!creativeVisible) {
-      console.log(`[WAIT] ?щ━?먯씠?곕툕 ?ㅼ젙 踰꾪듉 ?먯깋 ?ъ떆??${attempt}/10`);
+      console.log(`[WAIT] creative settings button search retry ${attempt}/10`);
       await page.waitForTimeout(5000);
       continue;
     }
 
     await page.waitForTimeout(5000);
     const settingBox = await creativeSettings.boundingBox().catch(() => null);
-    console.log('[DEBUG] ?щ━?먯씠?곕툕 ?ㅼ젙 踰꾪듉 box:', settingBox);
+    console.log('[DEBUG] creative settings button box:', settingBox);
 
     let clicked = false;
     await creativeSettings.click({ force: true }).then(() => { clicked = true; }).catch(() => null);
@@ -3239,7 +3239,7 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landing
       ];
 
       for (const [idx, pt] of clickTargets.entries()) {
-        console.log('[DEBUG] ?щ━?먯씠?곕툕 ?ㅼ젙 醫뚰몴 ?대┃ ?쒕룄:', { attempt, index: idx + 1, pt });
+        console.log('[DEBUG] creative settings coordinate click attempt:', { attempt, index: idx + 1, pt });
         await page.mouse.click(pt.x, pt.y).catch(() => null);
         await page.waitForTimeout(2000);
 
@@ -3260,17 +3260,17 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landing
 
     if (openedByCreativeAdMode && openedByUpload) {
       creativeOpened = true;
-      console.log('[STEP] ?щ━?먯씠?곕툕 ?ㅼ젙 吏꾩엯 ?깃났');
+      console.log('[STEP] creative settings opened successfully');
       break;
     }
 
-    console.log(`[WAIT] ?щ━?먯씠?곕툕 ?ㅼ젙 吏꾩엯 ?뺤씤 ?ъ떆??${attempt}/10`);
+    console.log(`[WAIT] creative settings opened check retry ${attempt}/10`);
     await page.waitForTimeout(5000);
   }
 
   if (!creativeOpened) {
     await debugDump(page, 'creative settings not opened after retries');
-    throw new Error('?щ━?먯씠?곕툕 ?ㅼ젙 吏꾩엯 ?ㅽ뙣: ?대?吏 愿묎퀬/?낅줈???뺤씤 遺덇?');
+    throw new Error('Failed to open creative settings: image/video ad upload area not detected.');
   }
 
   console.log('[STEP] creative settings opened - selecting ad mode from env');
@@ -3357,7 +3357,7 @@ async function enterCreativeInsideEditor(page, adFormat = AD_FORMAT) {
 }
 
 async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCount = 10, adCreativeCount = 5) {
-  console.log('[STEP] 愿묎퀬?명듃/愿묎퀬?뚯옱 ?쒖감 ?대쫫 蹂寃??쒖옉');
+  console.log('[STEP] sequential adset/ad rename started');
 
   let adsetIndex = adsetStartIndex;
   let adCreativeIndex = 1;
@@ -3375,7 +3375,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
 
     const rows = await page.locator('[role="row"]').elementHandles();
     if (!rows.length) {
-      console.log(`[WAIT] row 誘명깘吏 ?ъ떆??${attempt}/${maxRenameAttempts}`);
+      console.log(`[WAIT] rows not visible yet retry ${attempt}/${maxRenameAttempts}`);
       continue;
     }
 
@@ -3408,13 +3408,13 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const shouldRenameAdsetRow = (isAdsetCopy || isBlogAdsetNameRow || isImageOnlyAdsetNameRow || isVideoOnlyAdsetNameRow || isVideoOnlyCboAdsetNameRow) && adsetIndex <= adsetEndIndex;
 
       if (processedAdsetRows.has(rowKey) && (rowText.includes('광고세트') || rowText.includes('광고 세트') || rowText.includes(ADSET_BASE_NAME) || isBlogAdsetNameRow)) {
-        console.log('[DEBUG] ?대? 泥섎━??愿묎퀬?명듃 row 嫄대꼫?:', { rowKey, rowText: rowText.slice(0, 120) });
+        console.log('[DEBUG] already processed adset row skipped:', { rowKey, rowText: rowText.slice(0, 120) });
         continue;
       }
 
       if (isAlreadyTargetAdset && !isBlogAdsetCopyRow && isBlogMixedCampaign() && adsetIndex <= adsetEndIndex) {
         processedAdsetRows.add(rowKey);
-        console.log('[STEP] 愿묎퀬?명듃紐??대? 蹂寃쎈맖 - ?ㅼ쓬 愿묎퀬?명듃濡??대룞:', { targetAdsetName, rowKey });
+        console.log('[STEP] adset name already changed - moving to next adset:', { targetAdsetName, rowKey });
         adsetIndex += 1;
         progressedThisAttempt = true;
         continue;
@@ -3433,7 +3433,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           await page.keyboard.type(targetAdsetName, { delay: 60 });
           await page.waitForTimeout(5000);
           const actualAdsetName = await adsetInput.inputValue().catch(() => '');
-          console.log('[STEP] 愿묎퀬?명듃紐?蹂寃?', { targetAdsetName, actualAdsetName });
+          console.log('[STEP] adset name changed:', { targetAdsetName, actualAdsetName });
           if (!actualAdsetName.includes(targetAdsetName)) {
             throw new Error(`광고세트명 입력 확인 실패: expected=${targetAdsetName}, actual=${actualAdsetName}`);
           }
@@ -3482,11 +3482,11 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         await page.keyboard.press('Backspace');
         await page.keyboard.type(targetAdName, { delay: 60 });
         await page.waitForTimeout(5000);
-        console.log('[STEP] 愿묎퀬?뚯옱紐?蹂寃?', { targetAdName });
+        console.log('[STEP] ad name changed:', { targetAdName });
         const actualAdName = await adNameInput.inputValue().catch(() => '');
-        console.log('[DEBUG] 愿묎퀬?뚯옱紐??낅젰 ?뺤씤:', { targetAdName, actualAdName });
+        console.log('[DEBUG] ad name input check:', { targetAdName, actualAdName });
         if (!actualAdName.includes(targetAdName)) {
-          throw new Error(`愿묎퀬?뚯옱紐??낅젰 ?뺤씤 ?ㅽ뙣: expected=${targetAdName}, actual=${actualAdName}`);
+          throw new Error(`Ad name input verification failed: expected=${targetAdName}, actual=${actualAdName}`);
         }
 
         console.log('[STEP] ad creative plan:', {
@@ -3501,7 +3501,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
 
         await fillLandingUrlOnly(page, targetAdName, targetLandingUrl);
         await page.waitForTimeout(5000);
-        console.log('[STEP] ?쒕뵫 URL ?④퀎 ?꾨즺 ???덉젙???湲??꾨즺:', { targetAdName });
+        console.log('[STEP] landing URL step completed and stabilized:', { targetAdName });
 
         await enterCreativeInsideEditor(page, targetAdFormat);
         await page.waitForTimeout(5000);
@@ -3531,22 +3531,22 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           await page.waitForTimeout(5000);
           await attachMediaFromFolderIfConfigured(page, targetAdName);
           firstCreativeMediaUploaded = true;
-          console.log('[STEP] 泥?踰덉㎏ 愿묎퀬?뚯옱 誘몃뵒???낅줈???꾨즺');
+          console.log('[STEP] first ad media upload completed');
         } else {
           await page.waitForTimeout(3000);
           await searchAndSelectExistingMedia(page, targetAdName);
-          console.log('[STEP] 湲곗〈 ?낅줈???대?吏 ?좏깮 ?꾨즺:', { targetAdName });
+          console.log('[STEP] existing uploaded media selected:', { targetAdName });
         }
 
         await page.waitForTimeout(7000);
-        console.log('[STEP] 愿묎퀬?뚯옱 誘몃뵒??泥섎━ ?꾩껜 ?꾨즺 - ?ㅼ쓬 愿묎퀬 ?먯깋 ???湲??꾨즺:', { targetAdName });
+        console.log('[STEP] ad media handling completed - waiting before next ad search:', { targetAdName });
 
         adCreativeIndex += 1;
         progressedThisAttempt = true;
       }
     }
 
-    console.log('[DEBUG] ?쒖감 蹂寃?吏꾪뻾??', {
+    console.log('[DEBUG] sequential rename progress:', {
       adsetIndex,
       adsetEndIndex,
       adCreativeIndex,
@@ -3558,22 +3558,22 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
     });
 
     if (adsetIndex > adsetEndIndex && adCreativeIndex > maxCreativeTotal) {
-      console.log('[STEP] 愿묎퀬?명듃/愿묎퀬?뚯옱 ?쒖감 ?대쫫 蹂寃??꾨즺');
+      console.log('[STEP] sequential adset/ad rename completed');
       return true;
     }
 
-    console.log(`[WAIT] ?쒖감 ?대쫫 蹂寃??ы깘??${attempt}/${maxRenameAttempts}`, { progressedThisAttempt });
+    console.log(`[WAIT] sequential rename retry ${attempt}/${maxRenameAttempts}`, { progressedThisAttempt });
     await page.mouse.wheel(0, progressedThisAttempt ? 250 : 700);
     await page.waitForTimeout(3000);
   }
 
   await safeScreenshot(page, path.join(DIRS.screenshots, 'adset-ad-rename-sequence-failed.png'), 'adset ad rename failed');
-  throw new Error('愿묎퀬?명듃/愿묎퀬?뚯옱 ?쒖감 ?대쫫 蹂寃??ㅽ뙣');
+  throw new Error('Sequential adset/ad rename failed.');
 }
 
 
 async function runCreativeStepOnly(page) {
-  console.log('[STEP] QUICK_TEST_CREATIVE_STEP=true - ?щ━?먯씠?곕툕 ?④퀎留??ㅽ뻾');
+  console.log('[STEP] QUICK_TEST_CREATIVE_STEP=true - running creative step only');
   await openCreativeSettingsAndFillLandingUrl(page, QUICK_TEST_AD_NAME);
   if (!firstCreativeMediaUploaded) {
     if (isVideoOnlyCampaign()) {
@@ -3772,7 +3772,7 @@ async function main() {
 
     await ensureDirs();
     updateRunContext({ current_step: 'connect_chrome' });
-    console.log(`[OPEN] 湲곗〈 Chrome ?몄뀡??CDP attach: ${CDP_URL}`);
+    console.log(`[OPEN] attaching to existing Chrome session via CDP: ${CDP_URL}`);
     browser = await chromium.connectOverCDP(CDP_URL);
 
     const context = browser.contexts()[0];
