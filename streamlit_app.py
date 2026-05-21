@@ -413,7 +413,25 @@ def show_command_result(title: str, command: list[str], code: int, output: str) 
 
 
 st.set_page_config(page_title="Meta Ads Automation", layout="wide")
-st.title("Meta Ads Automation")
+
+title_col, guide_col = st.columns([0.62, 0.38], vertical_alignment="center")
+with title_col:
+    st.title("Meta Ads Automation")
+with guide_col:
+    st.caption(
+        "회사 공유 사용 안내: Streamlit Cloud는 설정/프리뷰용이고, 실제 Meta 자동화는 각자 Windows PC에서 로컬 실행해야 합니다."
+    )
+
+with st.expander("회사 사람들과 같이 쓰는 방법"):
+    st.markdown(
+        """
+        - Streamlit Cloud 앱은 입력값 확인, preview, URL 예시 확인용입니다.
+        - 실제 자동화는 각 사용자 PC의 Chrome 로그인 세션, 로컬 소재 폴더, PowerShell을 사용하므로 각자 Windows PC에서 실행해야 합니다.
+        - 처음 쓰는 사람은 GitHub 저장소를 받은 뒤 `npm install`, `pip install -r requirements.txt`, `streamlit run streamlit_app.py` 순서로 실행합니다.
+        - 각 사용자는 자기 PC에서 `.env`를 따로 저장하고, 자기 Meta 계정으로 Chrome CDP를 열어 자동화를 실행합니다.
+        - 업데이트가 필요할 때는 로컬 폴더에서 `git pull origin main` 후 다시 Streamlit을 실행하면 됩니다.
+        """
+    )
 
 env = read_env()
 
