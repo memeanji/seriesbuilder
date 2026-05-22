@@ -459,8 +459,9 @@ function validateEnv() {
   if (!CAMPAIGN_NAME) throw new Error('CAMPAIGN_NAME is missing in .env');
   if (!Number.isFinite(ADSET_START_INDEX)) throw new Error('ADSET_START_INDEX must be a number');
   if (!Number.isFinite(ADSET_COUNT) || ADSET_COUNT < 0) throw new Error('ADSET_COUNT must be >= 0');
-  if (!Number.isFinite(AD_CREATIVE_COUNT) || AD_CREATIVE_COUNT < (isCboCampaign() ? 0 : 1)) {
-    throw new Error(`AD_CREATIVE_COUNT must be >= ${isCboCampaign() ? 0 : 1}`);
+  const minCreativeCount = (isCboCampaign() || isBlogVideoCampaign()) ? 0 : 1;
+  if (!Number.isFinite(AD_CREATIVE_COUNT) || AD_CREATIVE_COUNT < minCreativeCount) {
+    throw new Error(`AD_CREATIVE_COUNT must be >= ${minCreativeCount}`);
   }
   if (ADSET_DAILY_BUDGET && !/^\d+(\.\d+)?$/.test(ADSET_DAILY_BUDGET)) throw new Error('ADSET_DAILY_BUDGET must be a number');
   if (isCboCampaign()) formatBudgetForMetaInput(process.env.CAMPAIGN_BUDGET || '');
