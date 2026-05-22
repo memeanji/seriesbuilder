@@ -60,6 +60,7 @@ const WAIT_CONFIG = {
   videoFallbackWaitMs: Number(process.env.VIDEO_UPLOAD_FALLBACK_WAIT_MS || 90_000),
   modeOverrides: {
     [CAMPAIGN_MODES.BLOG_MIXED]: Number(process.env.MODE_01_WAIT_MS || process.env.BLOG_MIXED_WAIT_MS || 10_000),
+    [CAMPAIGN_MODES.BLOG_VIDEO]: Number(process.env.MODE_BLOG_VIDEO_WAIT_MS || process.env.BLOG_VIDEO_WAIT_MS || 12_000),
     [CAMPAIGN_MODES.IMAGE_ONLY]: Number(process.env.MODE_02_WAIT_MS || process.env.IMAGE_ONLY_WAIT_MS || 5_000),
     [CAMPAIGN_MODES.VIDEO_ONLY_CBO]: Number(process.env.MODE_03_WAIT_MS || process.env.VIDEO_ONLY_CBO_WAIT_MS || 12_000),
     [CAMPAIGN_MODES.IMAGE_ONLY_CBO]: Number(process.env.MODE_04_WAIT_MS || process.env.IMAGE_ONLY_CBO_WAIT_MS || 6_000),
@@ -195,7 +196,7 @@ function installWaitForTimeoutProfiler(page) {
 
 function getPlanAdsetCount() {
   if (activeCampaignPlan?.adsetCount) return activeCampaignPlan.adsetCount;
-  return (isBlogMixedCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? ADSET_COUNT + 1 : ADSET_COUNT;
+  return (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? ADSET_COUNT + 1 : ADSET_COUNT;
 }
 
 function getPlanAdCount() {
@@ -452,6 +453,14 @@ function isBlogMixedCampaign() {
   return CAMPAIGN_MODE === CAMPAIGN_MODES.BLOG_MIXED;
 }
 
+function isBlogVideoCampaign() {
+  return CAMPAIGN_MODE === CAMPAIGN_MODES.BLOG_VIDEO;
+}
+
+function isBlogCampaign() {
+  return isBlogMixedCampaign() || isBlogVideoCampaign();
+}
+
 function isVideoOnlyCampaign() {
   return CAMPAIGN_MODE === CAMPAIGN_MODES.VIDEO_ONLY;
 }
@@ -475,7 +484,7 @@ function normalizeText(value) {
 function normalizeAdFormat(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (['video', 'movie', '동영상', '영상'].includes(normalized)) return 'video';
-  if ([CAMPAIGN_MODES.VIDEO_ONLY, CAMPAIGN_MODES.VIDEO_ONLY_CBO].includes(normalizeCampaignMode(process.env.CAMPAIGN_MODE))) return 'video';
+  if ([CAMPAIGN_MODES.BLOG_VIDEO, CAMPAIGN_MODES.VIDEO_ONLY, CAMPAIGN_MODES.VIDEO_ONLY_CBO].includes(normalizeCampaignMode(process.env.CAMPAIGN_MODE))) return 'video';
   return 'image';
 }
 
@@ -4045,7 +4054,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       }).catch(() => ({ ariaLabel: '', objectType: '', surface: '' }));
       const rowKey = rowId || `${Math.round(rowBox.x)}:${Math.round(rowBox.y)}:${rowText.slice(0, 80)}`;
       const targetAdsetName = adsetIndex <= adsetEndIndex
-        ? (isBlogMixedCampaign()
+        ? (isBlogCampaign()
           ? buildBlogAdsetName(adsetIndex, process.env)
           : (isVideoOnlyCampaign()
             ? buildVideoOnlyAdsetName(adsetIndex, process.env)
@@ -4076,9 +4085,9 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const isDefaultAdRow = /새\s*판매\s*광고(?!\s*세트)/.test(normalizedRowText) || /광고\s*-\s*사본/.test(normalizedRowText);
       const hasPlannedAdName = [...plannedAdNames].some((name) => name && normalizedRowText.includes(name));
       const isAdCopy = isAdStructureRow && (isDefaultAdRow || isAdRowCopy || !hasPlannedAdName);
-      const isBlogAdsetNameRow = isBlogMixedCampaign() && isAdsetStructureRow && /f_i_b_o_l_\d{4}_\d+/i.test(rowText);
+      const isBlogAdsetNameRow = isBlogCampaign() && isAdsetStructureRow && /f_[iv]_b_o_l_\d{4}_\d+/i.test(rowText);
       const isBlogAdsetCopyRow = isBlogAdsetNameRow && /사본|copy/i.test(rowText);
-      const isImageOnlyAdsetNameRow = !isBlogMixedCampaign() && isAdsetStructureRow && /\d{4}\s+리타겟\s+\d+번\s+광고\s*세트/i.test(rowText);
+      const isImageOnlyAdsetNameRow = !isBlogCampaign() && isAdsetStructureRow && /\d{4}\s+리타겟\s+\d+번\s+광고\s*세트/i.test(rowText);
       const isVideoOnlyAdsetNameRow = isVideoOnlyCampaign() && isAdsetStructureRow && /\d{4}\s+직접세팅\s+광고\s*세트\s*-\s*\d+/i.test(rowText);
       const isVideoOnlyCboAdsetNameRow = isVideoOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(rowText);
       const isImageOnlyCboAdsetNameRow = isImageOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(rowText);
@@ -4194,12 +4203,12 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         const visible = await adNameInput.isVisible({ timeout: 5000 }).catch(() => false);
         if (!visible) continue;
 
-        const blogAdPlan = isBlogMixedCampaign() ? getBlogAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
+        const blogAdPlan = isBlogCampaign() ? getBlogAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
         const videoAdPlan = isVideoOnlyCampaign() ? getVideoOnlyAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
         const videoCboAdPlan = isVideoOnlyCboCampaign() ? getVideoOnlyCboAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
         const imageCboAdPlan = isImageOnlyCboCampaign() ? getImageOnlyCboAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
-        if (isBlogMixedCampaign() && !blogAdPlan) {
-          throw new Error(`BLOG_MIXED ad plan not found for creative sequence ${adCreativeIndex}`);
+        if (isBlogCampaign() && !blogAdPlan) {
+          throw new Error(`${CAMPAIGN_MODE} ad plan not found for creative sequence ${adCreativeIndex}`);
         }
         if (isVideoOnlyCampaign() && !videoAdPlan) {
           throw new Error(`VIDEO_ONLY ad plan not found for creative sequence ${adCreativeIndex}`);
@@ -4243,7 +4252,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         await page.waitForTimeout(getCreativeStabilizeWaitMs(targetAdFormat));
         console.log('[STEP] creative format step completed:', { targetAdName, targetAdFormat });
 
-        if (isBlogMixedCampaign() || isVideoOnlyCampaign() || isCboCampaign()) {
+        if (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) {
           await page.waitForTimeout(getMediaPreUploadWaitMs(targetAdFormat));
           await timedStep(targetAdFormat === 'video' ? 'upload_video' : 'upload_image', targetAdName, () => attachMediaFromFolderIfConfigured(page, targetAdName, [targetAssetPath], targetAdFormat));
           console.log('[STEP] planned media upload completed:', {
@@ -4382,8 +4391,8 @@ async function runFlow(page) {
   }
 
   for (let n = 0; n < 1; n += 1) {
-    const index = (isBlogMixedCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? n + 1 : ADSET_START_INDEX + n;
-    const adsetName = isBlogMixedCampaign()
+    const index = (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? n + 1 : ADSET_START_INDEX + n;
+    const adsetName = isBlogCampaign()
       ? buildBlogAdsetName(index, process.env)
       : (isVideoOnlyCampaign()
         ? buildVideoOnlyAdsetName(index, process.env)
@@ -4421,7 +4430,7 @@ async function runFlow(page) {
       console.log('[STEP] CBO keeps campaign budget unchanged; adset budget fill skipped');
     }
 
-    const adCreativeDuplicateCount = isBlogMixedCampaign()
+    const adCreativeDuplicateCount = isBlogCampaign()
       ? Math.max((activeCampaignPlan?.totalAdsPerAdset || 5) - 1, 0)
       : ((isVideoOnlyCampaign() || isCboCampaign()) ? Math.max((activeCampaignPlan?.totalAdsPerAdset || AD_CREATIVE_COUNT + 1) - 1, 0) : Math.max(AD_CREATIVE_COUNT, 0));
     if (adCreativeDuplicateCount > 0) {
@@ -4431,7 +4440,7 @@ async function runFlow(page) {
       await pause(page, '새 판매 광고 복제 설정 후 대기', 7000);
     }
 
-    const adsetDuplicateCount = isBlogMixedCampaign()
+    const adsetDuplicateCount = isBlogCampaign()
       ? Math.max((activeCampaignPlan?.adsetCount || ADSET_COUNT) - 1, 0)
       : ((isVideoOnlyCampaign() || isCboCampaign()) ? Math.max((activeCampaignPlan?.adsetCount || ADSET_COUNT + 1) - 1, 0) : Math.max(ADSET_COUNT, 0));
     if (adsetDuplicateCount > 0) {
@@ -4443,7 +4452,7 @@ async function runFlow(page) {
 
     if (n === 0) {
       updateRunContext({ current_step: 'rename_ads_and_upload_media' });
-      await timedStep('rename_ads_and_upload_media', adsetName, () => renameAdsetsAndAdsSequentially(page, (isBlogMixedCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount));
+      await timedStep('rename_ads_and_upload_media', adsetName, () => renameAdsetsAndAdsSequentially(page, (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount));
     }
 
   }
@@ -4489,7 +4498,7 @@ async function main() {
 
     if (DRY_RUN) {
       updateRunContext({ current_step: 'dry_run' });
-      if ([CAMPAIGN_MODES.BLOG_MIXED, CAMPAIGN_MODES.VIDEO_ONLY, CAMPAIGN_MODES.VIDEO_ONLY_CBO, CAMPAIGN_MODES.IMAGE_ONLY_CBO].includes(validation.mode)) {
+      if ([CAMPAIGN_MODES.BLOG_MIXED, CAMPAIGN_MODES.BLOG_VIDEO, CAMPAIGN_MODES.VIDEO_ONLY, CAMPAIGN_MODES.VIDEO_ONLY_CBO, CAMPAIGN_MODES.IMAGE_ONLY_CBO].includes(validation.mode)) {
         console.log(formatDryRunPlan(activeCampaignPlan));
       } else if (activeCampaignPlan?.uploadMode === 'PER_AD') {
         console.log('[DRY RUN] Meta Ads Automation plan');

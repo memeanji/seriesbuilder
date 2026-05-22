@@ -93,21 +93,25 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
         f"MODE_02_WAIT_MS={values.get('MODE_02_WAIT_MS', '5000')}",
         f"MODE_03_WAIT_MS={values.get('MODE_03_WAIT_MS', '12000')}",
         f"MODE_04_WAIT_MS={values.get('MODE_04_WAIT_MS', '6000')}",
+        f"MODE_BLOG_VIDEO_WAIT_MS={values.get('MODE_BLOG_VIDEO_WAIT_MS', '12000')}",
         "",
     ]
 
-    if mode == "BLOG_MIXED":
+    if mode in {"BLOG_MIXED", "BLOG_VIDEO"}:
+        is_blog_video = mode == "BLOG_VIDEO"
         blog_actual_creatives = int(values.get("AD_CREATIVE_COUNT", "4") or "4") + 1
-        blog_image_creatives = max(blog_actual_creatives - 1, 1)
+        blog_image_creatives = 0 if is_blog_video else max(blog_actual_creatives - 1, 1)
+        blog_video_creatives = blog_actual_creatives if is_blog_video else 1
         lines.extend(
             [
                 f"AD_CREATIVE_COUNT={values.get('AD_CREATIVE_COUNT', '4')}",
                 f"BLOG_IMAGE_ADS_PER_ADSET={blog_image_creatives}",
-                "BLOG_VIDEO_ADS_PER_ADSET=1",
+                f"BLOG_VIDEO_ADS_PER_ADSET={blog_video_creatives}",
                 f"BLOG_TOTAL_ADS_PER_ADSET={blog_actual_creatives}",
-                "BLOG_ADSET_NAME_PREFIX=f_i_b_o_l",
+                f"BLOG_ADSET_NAME_PREFIX={'f_v_b_o_l' if is_blog_video else 'f_i_b_o_l'}",
                 "BLOG_IMAGE_AD_NAME_PREFIX=f_i_b_o_l",
                 "BLOG_VIDEO_AD_NAME_PREFIX=f_v_b_o_l",
+                f"AD_FORMAT={'video' if is_blog_video else 'image'}",
                 "DATE_FORMAT=MMDD",
                 "",
                 f"BLOG_ASSET_ROOT={values.get('BLOG_ASSET_ROOT', '')}",
@@ -275,9 +279,17 @@ def expected_blog_folder_name(adset_index: int, budget: str, schedule_time: str,
     return f"{mmdd} {adset_index}번 광고세트-일예산 {budget_manwon}만원-이미지 {image_count}개 + 영상 1개 익일 {hour}시"
 
 
-def build_blog_adset_name(index: int) -> str:
+def expected_blog_video_folder_name(adset_index: int, budget: str, schedule_time: str, video_count: int) -> str:
     mmdd = datetime.now().strftime("%m%d")
-    return f"f_i_b_o_l_{mmdd}_{index}"
+    budget_manwon = int(int(budget or "0") / 10000)
+    hour = schedule_time.split(":", 1)[0].zfill(2)
+    return f"{mmdd} {adset_index}번 광고세트-일예산 {budget_manwon}만원-영상 {video_count}개 익일 {hour}시"
+
+
+def build_blog_adset_name(index: int, video: bool = False) -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    prefix = "f_v_b_o_l" if video else "f_i_b_o_l"
+    return f"{prefix}_{mmdd}_{index}"
 
 
 def build_blog_image_ad_name(index: int) -> str:
@@ -417,9 +429,10 @@ def validate_form(values: dict[str, str]) -> list[str]:
         errors.append("CAMPAIGN_NAME is required.")
     if not values.get("AD_ACCOUNT_ID", "").strip():
         errors.append("AD_ACCOUNT_ID is required.")
-    if values.get("CAMPAIGN_MODE") == "BLOG_MIXED":
+    if values.get("CAMPAIGN_MODE") in {"BLOG_MIXED", "BLOG_VIDEO"}:
+        mode = values.get("CAMPAIGN_MODE")
         if not values.get("BLOG_ASSET_ROOT", "").strip():
-            errors.append("BLOG_ASSET_ROOT is required for BLOG_MIXED.")
+            errors.append(f"BLOG_ASSET_ROOT is required for {mode}.")
         adset_count = int(values.get("ADSET_COUNT", "1") or "1")
         for index in range(1, adset_count + 1):
             if not values.get(f"BLOG_LANDING_URL_{index}", "").strip():
@@ -509,6 +522,7 @@ with st.expander("공통 wait/retry 설정", expanded=False):
     mode_02_wait_ms = st.number_input("mode_02_wait IMAGE_ONLY(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_02_WAIT_MS", "5000") or "5000"), step=1000)
     mode_03_wait_ms = st.number_input("mode_03_wait VIDEO_ONLY_CBO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_03_WAIT_MS", "12000") or "12000"), step=1000)
     mode_04_wait_ms = st.number_input("mode_04_wait IMAGE_ONLY_CBO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_04_WAIT_MS", "6000") or "6000"), step=1000)
+    mode_blog_video_wait_ms = st.number_input("mode_blog_video_wait BLOG_VIDEO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_BLOG_VIDEO_WAIT_MS", "12000") or "12000"), step=1000)
 
 with st.expander("실패 지점부터 재실행", expanded=False):
     st.caption("광고명 변경/소재 업로드 중 중단된 경우, 실패한 광고 번호 또는 광고명을 넣고 다시 실행하면 해당 광고부터 이어서 처리합니다.")
@@ -632,7 +646,7 @@ st.subheader("Campaign Settings")
 
 left, right = st.columns(2)
 with left:
-    campaign_mode_options = ["BLOG_MIXED", "IMAGE_ONLY", "VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"]
+    campaign_mode_options = ["BLOG_MIXED", "BLOG_VIDEO", "IMAGE_ONLY", "VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"]
     current_campaign_mode = env.get("CAMPAIGN_MODE", "IMAGE_ONLY")
     if current_campaign_mode not in campaign_mode_options:
         current_campaign_mode = "IMAGE_ONLY"
@@ -650,11 +664,11 @@ with right:
         adset_count = 0
         st.info("CBO campaign structure: 1 campaign / 1 adset. Choose only the ad count below.")
     else:
-        adset_count_min = 1 if campaign_mode == "BLOG_MIXED" else 0
+        adset_count_min = 1 if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO"} else 0
         adset_count_default = max(adset_count_min, int(env.get("ADSET_COUNT", "3") or "3"))
-        adset_count_label = "Adset count (BLOG_MIXED actual adsets)" if campaign_mode == "BLOG_MIXED" else "Adset count"
-        if campaign_mode == "BLOG_MIXED":
-            adset_count_help = "입력한 숫자 그대로 실제 광고세트 개수입니다. 광고세트 안의 소재 수는 BLOG_MIXED의 Ad creative count에서 정하고, 마지막 소재 1개는 영상입니다."
+        adset_count_label = f"Adset count ({campaign_mode} actual adsets)" if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO"} else "Adset count"
+        if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO"}:
+            adset_count_help = "입력한 숫자 그대로 실제 광고세트 개수입니다. 광고세트 안의 소재 수는 Ad creative count에서 정합니다. BLOG_MIXED는 마지막 1개만 영상이고, BLOG_VIDEO는 전부 영상입니다."
         else:
             adset_count_help = "기존 IMAGE_ONLY/VIDEO_ONLY 흐름에서는 입력값이 복제 기준으로 저장되어 실제 광고세트는 입력값 + 1개로 구성됩니다. 예: 0 입력 -> 1개, 2 입력 -> 3개."
         adset_count = st.number_input(
@@ -701,6 +715,7 @@ next_env: dict[str, str] = {
     "MODE_02_WAIT_MS": str(mode_02_wait_ms),
     "MODE_03_WAIT_MS": str(mode_03_wait_ms),
     "MODE_04_WAIT_MS": str(mode_04_wait_ms),
+    "MODE_BLOG_VIDEO_WAIT_MS": str(mode_blog_video_wait_ms),
 }
 
 with st.expander("Notification preview", expanded=False):
@@ -711,53 +726,73 @@ with st.expander("Notification preview", expanded=False):
     st.write(f"- 검증/중단 알림: {'ON' if notify_on_stop else 'OFF'}")
     st.write(f"- 영상 업로드 타임아웃 알림: {'ON' if notify_on_video_upload_timeout else 'OFF'}")
 
-if campaign_mode == "BLOG_MIXED":
-    st.subheader("BLOG_MIXED")
-    st.caption("Mixed blog mode: the final creative in each adset is video, and all previous creatives are images.")
+if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO"}:
+    is_blog_video = campaign_mode == "BLOG_VIDEO"
+    st.subheader(campaign_mode)
+    st.caption(
+        "Blog video mode: every creative in each adset is video."
+        if is_blog_video
+        else "Mixed blog mode: the final creative in each adset is video, and all previous creatives are images."
+    )
     blog_creative_count = st.number_input(
         "Ad creative count",
         min_value=1,
         max_value=100,
         value=int(env.get("AD_CREATIVE_COUNT", "4") or "4"),
-        help="광고 소재 복제 수입니다. 실제 매체 소재 수는 입력값 + 1개입니다. 마지막 1개는 영상이고, 나머지는 이미지입니다. 예: 4 입력 -> 실제 5개, 이미지 4개 + 영상 1개.",
+        help=(
+            "광고 소재 복제 수입니다. 실제 매체 소재 수는 입력값 + 1개입니다. BLOG_VIDEO는 실제 소재가 모두 영상입니다. 예: 4 입력 -> 실제 영상 5개."
+            if is_blog_video
+            else "광고 소재 복제 수입니다. 실제 매체 소재 수는 입력값 + 1개입니다. 마지막 1개는 영상이고, 나머지는 이미지입니다. 예: 4 입력 -> 실제 5개, 이미지 4개 + 영상 1개."
+        ),
     )
     blog_actual_creative_count = int(blog_creative_count) + 1
-    blog_image_count = max(blog_actual_creative_count - 1, 1)
+    blog_image_count = 0 if is_blog_video else max(blog_actual_creative_count - 1, 1)
+    blog_video_count = blog_actual_creative_count if is_blog_video else 1
     next_env["AD_CREATIVE_COUNT"] = str(blog_creative_count)
     blog_root = st.text_input("Blog asset root", value=env.get("BLOG_ASSET_ROOT", default_blog_root()))
     next_env["BLOG_ASSET_ROOT"] = blog_root
 
     with st.expander("Expected folder names", expanded=True):
         for index in range(1, int(adset_count) + 1):
-            st.write(f"{index}. `{expected_blog_folder_name(index, daily_budget, schedule_time, blog_image_count)}`")
+            folder_name = (
+                expected_blog_video_folder_name(index, daily_budget, schedule_time, blog_video_count)
+                if is_blog_video
+                else expected_blog_folder_name(index, daily_budget, schedule_time, blog_image_count)
+            )
+            st.write(f"{index}. `{folder_name}`")
 
     st.subheader("Landing URLs")
-    st.caption("VIDEO_ONLY_CBO preview처럼 확인하되, URL은 광고별이 아니라 광고세트 1개당 1개만 입력합니다.")
+    st.caption("URL은 광고별이 아니라 광고세트 1개당 1개만 입력합니다. 해당 광고세트 안의 모든 소재에 같은 URL이 들어갑니다.")
     blog_preview_rows = []
     for index in range(1, int(adset_count) + 1):
         key = f"BLOG_LANDING_URL_{index}"
         landing_url = st.text_input(f"Adset {index} landing URL", value=env.get(key, ""))
         next_env[key] = landing_url
         first_ad_index = ((index - 1) * blog_actual_creative_count) + 1
-        image_names = [build_blog_image_ad_name(first_ad_index + offset) for offset in range(blog_image_count)]
-        video_name = build_blog_video_ad_name(first_ad_index + blog_image_count)
+        image_names = [] if is_blog_video else [build_blog_image_ad_name(first_ad_index + offset) for offset in range(blog_image_count)]
+        video_names = [build_blog_video_ad_name(first_ad_index + blog_image_count + offset) for offset in range(blog_video_count)]
+        folder_name = (
+            expected_blog_video_folder_name(index, daily_budget, schedule_time, blog_video_count)
+            if is_blog_video
+            else expected_blog_folder_name(index, daily_budget, schedule_time, blog_image_count)
+        )
         blog_preview_rows.append(
             {
                 "adset_index": index,
-                "adset_name": build_blog_adset_name(index),
+                "adset_name": build_blog_adset_name(index, video=is_blog_video),
                 "landing_url": landing_url or "(missing)",
-                "image_ads": ", ".join(image_names),
-                "video_ad": video_name,
-                "expected_folder": expected_blog_folder_name(index, daily_budget, schedule_time, blog_image_count),
+                "image_ads": ", ".join(image_names) if image_names else "-",
+                "video_ads": ", ".join(video_names),
+                "expected_folder": folder_name,
             }
         )
 
-    with st.expander("BLOG_MIXED preview / validation", expanded=True):
+    with st.expander(f"{campaign_mode} preview / validation", expanded=True):
         st.write(f"Campaign name: `{campaign_name or '(missing)'}`")
         st.write(f"Adset count: `{adset_count}`")
         st.write(f"Actual creatives per adset: `{blog_actual_creative_count}`")
         st.write(f"Image creatives per adset: `{blog_image_count}`")
-        st.write("Video creatives per adset: `1`")
+        st.write(f"Video creatives per adset: `{blog_video_count}`")
         st.write(f"Blog asset root: `{blog_root}`")
         st.dataframe(blog_preview_rows, use_container_width=True)
         missing_urls = [row["adset_index"] for row in blog_preview_rows if row["landing_url"] == "(missing)"]

@@ -43,11 +43,13 @@ npx playwright show-trace logs\trace-YYYY-MM-DDT00-00-00-000Z.zip
 - `MODE_02_WAIT_MS`
 - `MODE_03_WAIT_MS`
 - `MODE_04_WAIT_MS`
+- `MODE_BLOG_VIDEO_WAIT_MS`
 
 현재 프로그램은 여러 캠페인 모드를 지원합니다.
 
 - `IMAGE_ONLY`: 기존 이미지 전용 흐름입니다. `CAMPAIGN_MODE`를 비워두거나 `IMAGE_ONLY`로 두면 기존 방식으로 동작합니다.
 - `BLOG_MIXED`: 블로그 캠페인용 흐름입니다. `AD_CREATIVE_COUNT + 1`개 광고를 구성하고, 마지막 광고 1개는 동영상 광고로 둡니다.
+- `BLOG_VIDEO`: 블로그 캠페인용 영상 전용 흐름입니다. `BLOG_MIXED`와 같은 광고세트별 랜딩 URL 구조를 쓰되, 모든 광고 소재를 동영상 광고로 설정합니다.
 - `VIDEO_ONLY`: 동영상 직접랜딩 캠페인용 흐름입니다. 동영상 광고만 만들고 광고명 기준으로 직접랜딩 URL을 자동 생성합니다.
 - `VIDEO_ONLY_CBO`: 영상 only CBO 캠페인 생성 흐름입니다. 새 판매 캠페인을 만들고 캠페인명, 캠페인 예산, 광고세트/광고명, 랜딩 URL, 영상 파일을 순서대로 입력합니다.
 - `IMAGE_ONLY_CBO`: 이미지 only CBO 캠페인 생성 흐름입니다. `VIDEO_ONLY_CBO`와 같은 CBO 생성 흐름을 쓰되 크리에이티브 설정에서 이미지 광고를 선택하고 광고명과 같은 이미지 파일을 업로드합니다.
@@ -160,7 +162,7 @@ Streamlit UI에서 할 수 있는 일:
 - `git pull origin main`
 - `npm install`
 - `.env` 저장 및 VS Code로 열기
-- 캠페인 모드 선택: `BLOG_MIXED`, `IMAGE_ONLY`, `VIDEO_ONLY_CBO`, `IMAGE_ONLY_CBO`
+- 캠페인 모드 선택: `BLOG_MIXED`, `BLOG_VIDEO`, `IMAGE_ONLY`, `VIDEO_ONLY_CBO`, `IMAGE_ONLY_CBO`
 - 캠페인 모드에 맞는 입력값 표시
 - 실행 전 dry-run 및 preview 확인
 - Chrome CDP 실행
@@ -286,6 +288,32 @@ BLOG_LANDING_URL_3=https://example.com/landing-3
 BLOG_LANDING_URL_4=https://example.com/landing-4
 BLOG_LANDING_URL_5=https://example.com/landing-5
 
+BLOG_ASSET_ROOT=./assets/blog
+```
+
+## BLOG_VIDEO 모드
+
+`BLOG_MIXED`와 같은 블로그 캠페인 구조를 쓰지만, 광고세트 안의 모든 광고 소재를 동영상 광고로 설정합니다.
+
+- 광고세트별 랜딩 URL은 `BLOG_LANDING_URL_N`으로 직접 입력합니다.
+- `AD_CREATIVE_COUNT=4`이면 실제 동영상 광고 5개가 생성됩니다.
+- 광고세트명 기본 규칙: `f_v_b_o_l_MMDD_{adset_index}`
+- 광고명 기본 규칙: `f_v_b_o_l_MMDD_{global_ad_index}`
+- 각 광고세트 폴더에는 실제 소재 수만큼 영상 파일이 있어야 합니다.
+
+예시:
+
+```env
+CAMPAIGN_MODE=BLOG_VIDEO
+ADSET_COUNT=2
+AD_CREATIVE_COUNT=2
+BLOG_IMAGE_ADS_PER_ADSET=0
+BLOG_VIDEO_ADS_PER_ADSET=3
+BLOG_TOTAL_ADS_PER_ADSET=3
+BLOG_ADSET_NAME_PREFIX=f_v_b_o_l
+BLOG_VIDEO_AD_NAME_PREFIX=f_v_b_o_l
+BLOG_LANDING_URL_1=https://example.com/blog-1
+BLOG_LANDING_URL_2=https://example.com/blog-2
 BLOG_ASSET_ROOT=./assets/blog
 ```
 

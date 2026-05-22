@@ -4,6 +4,7 @@ import path from 'node:path';
 export const CAMPAIGN_MODES = {
   IMAGE_ONLY: 'IMAGE_ONLY',
   BLOG_MIXED: 'BLOG_MIXED',
+  BLOG_VIDEO: 'BLOG_VIDEO',
   VIDEO_ONLY: 'VIDEO_ONLY',
   VIDEO_ONLY_CBO: 'VIDEO_ONLY_CBO',
   IMAGE_ONLY_CBO: 'IMAGE_ONLY_CBO',
@@ -23,6 +24,9 @@ export function normalizeCampaignMode(value) {
   if (['BLOG', 'BLOG_CAMPAIGN', 'BLOG_MIXED', 'BLOG_MIXED_CAMPAIGN'].includes(normalized)) {
     return CAMPAIGN_MODES.BLOG_MIXED;
   }
+  if (['BLOG_VIDEO', 'BLOG_VIDEO_CAMPAIGN', 'BLOG_VIDEO_ONLY', 'BLOG_ONLY_VIDEO'].includes(normalized)) {
+    return CAMPAIGN_MODES.BLOG_VIDEO;
+  }
   if (['VIDEO', 'VIDEO_ONLY', 'VIDEO_CAMPAIGN', 'VIDEO_ONLY_CAMPAIGN'].includes(normalized)) {
     return CAMPAIGN_MODES.VIDEO_ONLY;
   }
@@ -37,6 +41,10 @@ export function normalizeCampaignMode(value) {
 
 export function isBlogMixedMode(mode) {
   return normalizeCampaignMode(mode) === CAMPAIGN_MODES.BLOG_MIXED;
+}
+
+export function isBlogVideoMode(mode) {
+  return normalizeCampaignMode(mode) === CAMPAIGN_MODES.BLOG_VIDEO;
 }
 
 export function readIntegerEnv(env, key, defaultValue) {
@@ -68,7 +76,7 @@ export function getTodayString({
 }
 
 export function buildBlogAdsetName(adsetIndex, env = process.env, date = new Date()) {
-  const prefix = env.BLOG_ADSET_NAME_PREFIX || 'f_i_b_o_l';
+  const prefix = env.BLOG_ADSET_NAME_PREFIX || (isBlogVideoMode(env.CAMPAIGN_MODE) ? 'f_v_b_o_l' : 'f_i_b_o_l');
   const today = getTodayString({
     date,
     timezone: env.TIMEZONE || 'Asia/Seoul',
@@ -519,11 +527,15 @@ export function buildVideoCreativePayload({
 export async function buildBlogMixedPlan(env = process.env, options = {}) {
   const baseDir = options.baseDir || process.cwd();
   const date = options.date || new Date();
+  const mode = normalizeCampaignMode(env.CAMPAIGN_MODE);
+  const isBlogVideo = mode === CAMPAIGN_MODES.BLOG_VIDEO;
   const adsetCount = readIntegerEnv(env, 'ADSET_COUNT', 1);
   const fallbackTotalAdsPerAdset = readIntegerEnv(
     env,
     'BLOG_TOTAL_ADS_PER_ADSET',
-    readIntegerEnv(env, 'BLOG_IMAGE_ADS_PER_ADSET', 4) + readIntegerEnv(env, 'BLOG_VIDEO_ADS_PER_ADSET', 1),
+    isBlogVideo
+      ? readIntegerEnv(env, 'BLOG_VIDEO_ADS_PER_ADSET', readIntegerEnv(env, 'AD_CREATIVE_COUNT', 4) + 1)
+      : readIntegerEnv(env, 'BLOG_IMAGE_ADS_PER_ADSET', 4) + readIntegerEnv(env, 'BLOG_VIDEO_ADS_PER_ADSET', 1),
   );
   const adCreativeDuplicateCount = readIntegerEnv(
     env,
@@ -531,12 +543,12 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
     readIntegerEnv(env, 'ADSET_CREATIVE_COUNT', Math.max(fallbackTotalAdsPerAdset - 1, 1)),
   );
   const totalAdsPerAdset = adCreativeDuplicateCount + 1;
-  const videoAdsPerAdset = 1;
+  const videoAdsPerAdset = isBlogVideo ? totalAdsPerAdset : 1;
   const imageAdsPerAdset = totalAdsPerAdset - videoAdsPerAdset;
 
   if (adsetCount < 1) throw new Error('ADSET_COUNT must be >= 1.');
-  if (adCreativeDuplicateCount < 1) throw new Error('AD_CREATIVE_COUNT must be >= 1 for BLOG_MIXED.');
-  if (imageAdsPerAdset < 1) throw new Error('BLOG_MIXED requires at least 1 image ad before the final video ad.');
+  if (adCreativeDuplicateCount < 1) throw new Error('AD_CREATIVE_COUNT must be >= 1 for BLOG_MIXED/BLOG_VIDEO.');
+  if (!isBlogVideo && imageAdsPerAdset < 1) throw new Error('BLOG_MIXED requires at least 1 image ad before the final video ad.');
 
   const adsets = [];
   for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
@@ -545,28 +557,31 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
     const videoAssets = await getVideoAssetsForAdset(adsetIndex, env, { baseDir });
     const videoAsset = videoAssets[0] || '';
 
-    if (imageAssets.length !== imageAdsPerAdset) {
+    if (!isBlogVideo && imageAssets.length !== imageAdsPerAdset) {
       throw new Error(`BLOG_MIXED requires exactly ${imageAdsPerAdset} image assets for adset ${adsetIndex}. Found ${imageAssets.length}.`);
     }
 
-    const invalidImage = imageAssets.find((assetPath) => !IMAGE_EXTENSIONS.test(assetPath));
+    const invalidImage = imageAssets.slice(0, imageAdsPerAdset).find((assetPath) => !IMAGE_EXTENSIONS.test(assetPath));
     if (invalidImage) {
       throw new Error(`Invalid image asset for adset ${adsetIndex}: ${invalidImage}. Allowed: png, jpg, jpeg, webp, gif.`);
     }
-    for (const imageAsset of imageAssets) {
+    for (const imageAsset of imageAssets.slice(0, imageAdsPerAdset)) {
       if (!(await pathExists(imageAsset))) {
         throw new Error(`Image asset does not exist for adset ${adsetIndex}: ${imageAsset}`);
       }
     }
 
-    if (videoAssets.length !== 1) {
-      throw new Error(`BLOG_MIXED requires exactly 1 video asset for adset ${adsetIndex}. Found ${videoAssets.length}.`);
+    if (videoAssets.length !== videoAdsPerAdset) {
+      const videoAssetLabel = videoAdsPerAdset === 1 ? 'video asset' : 'video assets';
+      throw new Error(`${isBlogVideo ? 'BLOG_VIDEO' : 'BLOG_MIXED'} requires exactly ${videoAdsPerAdset} ${videoAssetLabel} for adset ${adsetIndex}. Found ${videoAssets.length}.`);
     }
-    if (!VIDEO_EXTENSIONS.test(videoAsset)) {
-      throw new Error(`Invalid video asset for adset ${adsetIndex}: ${videoAsset}. Allowed: mp4, mov, m4v, webm.`);
-    }
-    if (!(await pathExists(videoAsset))) {
-      throw new Error(`Video asset does not exist for adset ${adsetIndex}: ${videoAsset}`);
+    for (const assetPath of videoAssets) {
+      if (!VIDEO_EXTENSIONS.test(assetPath)) {
+        throw new Error(`Invalid video asset for adset ${adsetIndex}: ${assetPath}. Allowed: mp4, mov, m4v, webm.`);
+      }
+      if (!(await pathExists(assetPath))) {
+        throw new Error(`Video asset does not exist for adset ${adsetIndex}: ${assetPath}`);
+      }
     }
 
     const ads = [];
@@ -587,20 +602,23 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
       });
     }
 
-    const videoAdIndex = adIndexBase + totalAdsPerAdset;
-    ads.push({
-      type: 'video',
-      index: videoAdIndex,
-      adsetLocalIndex: totalAdsPerAdset,
-      name: buildBlogVideoAdName(videoAdIndex, env, date),
-      assetPath: videoAsset,
-      landingUrl,
-      creativePayload: buildVideoCreativePayload({
-        videoAsset,
-        thumbnailAsset: env[`BLOG_ADSET_${adsetIndex}_VIDEO_THUMBNAIL`] || env.BLOG_VIDEO_THUMBNAIL || '',
+    for (let videoIndex = 1; videoIndex <= videoAdsPerAdset; videoIndex += 1) {
+      const videoAdIndex = adIndexBase + imageAdsPerAdset + videoIndex;
+      const currentVideoAsset = videoAssets[videoIndex - 1];
+      ads.push({
+        type: 'video',
+        index: videoAdIndex,
+        adsetLocalIndex: imageAdsPerAdset + videoIndex,
+        name: buildBlogVideoAdName(videoAdIndex, env, date),
+        assetPath: currentVideoAsset,
         landingUrl,
-      }),
-    });
+        creativePayload: buildVideoCreativePayload({
+          videoAsset: currentVideoAsset,
+          thumbnailAsset: env[`BLOG_ADSET_${adsetIndex}_VIDEO_THUMBNAIL`] || env.BLOG_VIDEO_THUMBNAIL || '',
+          landingUrl,
+        }),
+      });
+    }
 
     adsets.push({
       index: adsetIndex,
@@ -608,12 +626,13 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
       landingUrl,
       imageAssets,
       videoAsset,
+      videoAssets,
       ads,
     });
   }
 
   return {
-    mode: CAMPAIGN_MODES.BLOG_MIXED,
+    mode,
     campaignName: env.CAMPAIGN_NAME || '',
     adsetCount,
     adCreativeDuplicateCount,

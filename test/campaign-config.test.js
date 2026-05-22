@@ -44,6 +44,16 @@ async function createBlogAssets(root, adsetCount = 5, imageCount = 4, includeVid
   }
 }
 
+async function createBlogVideoAssets(root, adsetCount = 2, videoCount = 3) {
+  for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
+    const videoDir = path.join(root, 'assets', 'blog', `adset_${adsetIndex}`, 'videos');
+    await fs.mkdir(videoDir, { recursive: true });
+    for (let videoIndex = 1; videoIndex <= videoCount; videoIndex += 1) {
+      await fs.writeFile(path.join(videoDir, `video${videoIndex}.mp4`), '');
+    }
+  }
+}
+
 async function createKoreanBlogAssets(root, adsetCount = 2, imageCount = 4, includeVideo = true) {
   for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
     const adsetDir = path.join(root, 'assets', 'blog', `0520 ${adsetIndex}번 광고세트-일예산 30만원-이미지 4개 + 영상 1개-익일 05시`);
@@ -91,6 +101,15 @@ test('BLOG_MIXED naming uses Asia/Seoul MMDD', () => {
   assert.equal(buildBlogAdsetName(1, env, fixedDate), 'f_i_b_o_l_0520_1');
   assert.equal(buildBlogImageAdName(4, env, fixedDate), 'f_i_b_o_l_0520_4');
   assert.equal(buildBlogVideoAdName(5, env, fixedDate), 'f_v_b_o_l_0520_5');
+});
+
+test('BLOG_VIDEO normalizes and defaults adset names to video prefix', () => {
+  const env = blogEnv(process.cwd(), {
+    CAMPAIGN_MODE: 'BLOG_VIDEO',
+    BLOG_ADSET_NAME_PREFIX: '',
+  });
+  assert.equal(normalizeCampaignMode('BLOG_VIDEO'), CAMPAIGN_MODES.BLOG_VIDEO);
+  assert.equal(buildBlogAdsetName(1, env, fixedDate), 'f_v_b_o_l_0520_1');
 });
 
 test('missing landing URL fails when ADSET_COUNT requires it', async () => {
@@ -297,6 +316,36 @@ test('BLOG_MIXED uses AD_CREATIVE_COUNT plus one and puts video last', async () 
     'image:f_i_b_o_l_0520_6',
     'image:f_i_b_o_l_0520_7',
     'video:f_v_b_o_l_0520_8',
+  ]);
+});
+
+test('BLOG_VIDEO uses AD_CREATIVE_COUNT plus one and makes every creative video', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-plan-'));
+  await createBlogVideoAssets(root, 2, 3);
+  const plan = await buildBlogMixedPlan(blogEnv(root, {
+    CAMPAIGN_MODE: 'BLOG_VIDEO',
+    ADSET_COUNT: '2',
+    AD_CREATIVE_COUNT: '2',
+    BLOG_IMAGE_ADS_PER_ADSET: '0',
+    BLOG_VIDEO_ADS_PER_ADSET: '3',
+    BLOG_TOTAL_ADS_PER_ADSET: '3',
+    BLOG_ADSET_NAME_PREFIX: '',
+  }), { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.mode, CAMPAIGN_MODES.BLOG_VIDEO);
+  assert.equal(plan.totalAdsPerAdset, 3);
+  assert.equal(plan.imageAdsPerAdset, 0);
+  assert.equal(plan.videoAdsPerAdset, 3);
+  assert.equal(plan.adsets[0].name, 'f_v_b_o_l_0520_1');
+  assert.deepEqual(plan.adsets[0].ads.map((ad) => `${ad.type}:${ad.name}`), [
+    'video:f_v_b_o_l_0520_1',
+    'video:f_v_b_o_l_0520_2',
+    'video:f_v_b_o_l_0520_3',
+  ]);
+  assert.deepEqual(plan.adsets[1].ads.map((ad) => `${ad.type}:${ad.name}`), [
+    'video:f_v_b_o_l_0520_4',
+    'video:f_v_b_o_l_0520_5',
+    'video:f_v_b_o_l_0520_6',
   ]);
 });
 
