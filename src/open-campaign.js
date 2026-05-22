@@ -208,16 +208,26 @@ function getPlanAdCount() {
 }
 
 function getResumeAdCreativeStartIndex(plan = activeCampaignPlan) {
-  if (Number.isFinite(RESUME_FROM_AD_INDEX) && RESUME_FROM_AD_INDEX > 1) {
-    return Math.floor(RESUME_FROM_AD_INDEX);
+  if (!RESUME_FROM_AD_NAME) {
+    if (Number.isFinite(RESUME_FROM_AD_INDEX) && RESUME_FROM_AD_INDEX > 1) {
+      return Math.floor(RESUME_FROM_AD_INDEX);
+    }
+    return 1;
   }
-  if (!RESUME_FROM_AD_NAME) return 1;
   const normalizedTarget = normalizeText(RESUME_FROM_AD_NAME);
   const plannedAds = (plan?.adsets || []).flatMap((adset) => adset.ads || []);
   const plannedIndex = plannedAds.findIndex((ad) => normalizeText(ad.name || '') === normalizedTarget);
   if (plannedIndex >= 0) return plannedIndex + 1;
   const trailingIndex = RESUME_FROM_AD_NAME.match(/_(\d+)$/)?.[1];
-  return trailingIndex ? Number(trailingIndex) : 1;
+  if (trailingIndex) return Number(trailingIndex);
+  if (Number.isFinite(RESUME_FROM_AD_INDEX) && RESUME_FROM_AD_INDEX > 1) {
+    return Math.floor(RESUME_FROM_AD_INDEX);
+  }
+  return 1;
+}
+
+function isResumeModeEnabled() {
+  return getResumeAdCreativeStartIndex() > 1;
 }
 
 function getModeWaitMs() {
@@ -4084,7 +4094,14 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const isAdRowCopy = /사본|copy/i.test(rowText);
       const isDefaultAdRow = /새\s*판매\s*광고(?!\s*세트)/.test(normalizedRowText) || /광고\s*-\s*사본/.test(normalizedRowText);
       const hasPlannedAdName = [...plannedAdNames].some((name) => name && normalizedRowText.includes(name));
-      const isAdCopy = isAdStructureRow && (isDefaultAdRow || isAdRowCopy || !hasPlannedAdName);
+      const currentBlogAdPlan = isBlogCampaign() ? getBlogAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
+      const currentVideoAdPlan = isVideoOnlyCampaign() ? getVideoOnlyAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
+      const currentVideoCboAdPlan = isVideoOnlyCboCampaign() ? getVideoOnlyCboAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
+      const currentImageCboAdPlan = isImageOnlyCboCampaign() ? getImageOnlyCboAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
+      const currentTargetPlan = currentBlogAdPlan || currentVideoAdPlan || currentVideoCboAdPlan || currentImageCboAdPlan;
+      const currentTargetAdName = normalizeText(currentTargetPlan?.name || getAdName(adCreativeIndex));
+      const isCurrentTargetAdRow = isAdStructureRow && currentTargetAdName && normalizedRowText.includes(currentTargetAdName);
+      const isAdCopy = isAdStructureRow && (isDefaultAdRow || isAdRowCopy || !hasPlannedAdName || isCurrentTargetAdRow);
       const isBlogAdsetNameRow = isBlogCampaign() && isAdsetStructureRow && /f_[iv]_b_o_l_\d{4}_\d+/i.test(rowText);
       const isBlogAdsetCopyRow = isBlogAdsetNameRow && /사본|copy/i.test(rowText);
       const isImageOnlyAdsetNameRow = !isBlogCampaign() && isAdsetStructureRow && /\d{4}\s+리타겟\s+\d+번\s+광고\s*세트/i.test(rowText);
@@ -4098,7 +4115,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         continue;
       }
 
-      if (isAdStructureRow && hasPlannedAdName && !isAdRowCopy) {
+      if (isAdStructureRow && hasPlannedAdName && !isAdRowCopy && !isCurrentTargetAdRow) {
         processedAdRows.add(rowKey);
         console.log('[DEBUG] already named ad row skipped:', { rowKey, rowText: rowText.slice(0, 120) });
         continue;
@@ -4388,6 +4405,27 @@ async function runFlow(page) {
     await safeScreenshot(page, PATHS.step3, 'page screenshot');
     await page.waitForLoadState('domcontentloaded');
     await safeScreenshot(page, PATHS.step4, 'page screenshot');
+  }
+
+  if (isResumeModeEnabled()) {
+    const resumeStartIndex = getResumeAdCreativeStartIndex();
+    const adCreativeDuplicateCount = isBlogCampaign()
+      ? Math.max((activeCampaignPlan?.totalAdsPerAdset || 5) - 1, 0)
+      : ((isVideoOnlyCampaign() || isCboCampaign()) ? Math.max((activeCampaignPlan?.totalAdsPerAdset || AD_CREATIVE_COUNT + 1) - 1, 0) : Math.max(AD_CREATIVE_COUNT, 0));
+    const adsetDuplicateCount = isBlogCampaign()
+      ? Math.max((activeCampaignPlan?.adsetCount || ADSET_COUNT) - 1, 0)
+      : ((isVideoOnlyCampaign() || isCboCampaign()) ? Math.max((activeCampaignPlan?.adsetCount || ADSET_COUNT + 1) - 1, 0) : Math.max(ADSET_COUNT, 0));
+    console.log('[STEP] resume mode - skipping create/schedule/duplicate steps and resuming ad edit:', {
+      resumeStartIndex,
+      RESUME_FROM_AD_INDEX,
+      RESUME_FROM_AD_NAME,
+      adCreativeDuplicateCount,
+      adsetDuplicateCount,
+    });
+    updateRunContext({ current_step: 'resume_rename_ads_and_upload_media' });
+    await timedStep('resume_rename_ads_and_upload_media', RESUME_FROM_AD_NAME || `ad_${resumeStartIndex}`, () => renameAdsetsAndAdsSequentially(page, (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount));
+    updateRunContext({ current_step: 'success' });
+    return;
   }
 
   for (let n = 0; n < 1; n += 1) {
