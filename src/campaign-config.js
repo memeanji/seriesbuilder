@@ -448,6 +448,11 @@ async function resolveBlogAssetDir(adsetIndex, env, options, kind) {
   return findBlogAdsetFolderFromRoot(rootDir, adsetIndex, options);
 }
 
+function resolveBlogAssetRoot(env = process.env, options = {}) {
+  const baseDir = options.baseDir || process.cwd();
+  return env.BLOG_ASSET_ROOT ? resolveAssetPath(env.BLOG_ASSET_ROOT, baseDir) : '';
+}
+
 export async function getImageAssetsForAdset(adsetIndex, env = process.env, options = {}) {
   const baseDir = options.baseDir || process.cwd();
   const explicitList = splitAssetList(env[`BLOG_ADSET_${adsetIndex}_IMAGE_ASSETS`])
@@ -469,6 +474,22 @@ export async function getVideoAssetsForAdset(adsetIndex, env = process.env, opti
   if (!videoDir) return [];
   if (!(await pathExists(videoDir))) return [];
   return listFilesFromDir(videoDir, VIDEO_EXTENSIONS);
+}
+
+async function getFlatBlogVideoAssets(env = process.env, options = {}) {
+  const rootDir = resolveBlogAssetRoot(env, options);
+  if (!rootDir || !(await pathExists(rootDir))) return [];
+  return listFilesFromDir(rootDir, VIDEO_EXTENSIONS).catch(() => []);
+}
+
+async function getBlogVideoAssetsForAdset(adsetIndex, totalAdsPerAdset, env = process.env, options = {}) {
+  const folderAssets = await getVideoAssetsForAdset(adsetIndex, env, options);
+  if (folderAssets.length) return folderAssets;
+
+  const flatAssets = await getFlatBlogVideoAssets(env, options);
+  if (!flatAssets.length) return [];
+  const startIndex = (adsetIndex - 1) * totalAdsPerAdset;
+  return flatAssets.slice(startIndex, startIndex + totalAdsPerAdset);
 }
 
 export async function getVideoAssetForAdset(adsetIndex, env = process.env, options = {}) {
@@ -554,7 +575,9 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
   for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
     const landingUrl = getLandingUrlForAdset(adsetIndex, env);
     const imageAssets = await getImageAssetsForAdset(adsetIndex, env, { baseDir });
-    const videoAssets = await getVideoAssetsForAdset(adsetIndex, env, { baseDir });
+    const videoAssets = isBlogVideo
+      ? await getBlogVideoAssetsForAdset(adsetIndex, totalAdsPerAdset, env, { baseDir })
+      : await getVideoAssetsForAdset(adsetIndex, env, { baseDir });
     const videoAsset = videoAssets[0] || '';
 
     if (!isBlogVideo && imageAssets.length !== imageAdsPerAdset) {

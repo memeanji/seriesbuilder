@@ -300,6 +300,8 @@ BLOG_ASSET_ROOT=./assets/blog
 - 광고세트명 기본 규칙: `f_v_b_o_l_MMDD_{adset_index}`
 - 광고명 기본 규칙: `f_v_b_o_l_MMDD_{global_ad_index}`
 - 각 광고세트 폴더에는 실제 소재 수만큼 영상 파일이 있어야 합니다.
+- 또는 `BLOG_ASSET_ROOT` 폴더 안에 영상을 한 번에 넣으면 파일명 순서대로 광고세트별로 끊어서 사용합니다.
+- 예: `ADSET_COUNT=6`, `AD_CREATIVE_COUNT=4`이면 총 영상 30개가 필요하고, 1~5번은 1번 광고세트, 6~10번은 2번 광고세트로 배정됩니다.
 
 예시:
 

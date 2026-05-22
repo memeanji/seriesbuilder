@@ -54,6 +54,14 @@ async function createBlogVideoAssets(root, adsetCount = 2, videoCount = 3) {
   }
 }
 
+async function createFlatBlogVideoAssets(root, videoCount = 6) {
+  const blogRoot = path.join(root, 'assets', 'blog');
+  await fs.mkdir(blogRoot, { recursive: true });
+  for (let videoIndex = 1; videoIndex <= videoCount; videoIndex += 1) {
+    await fs.writeFile(path.join(blogRoot, `f_v_b_o_l_0520_${videoIndex}.mp4`), '');
+  }
+}
+
 async function createKoreanBlogAssets(root, adsetCount = 2, imageCount = 4, includeVideo = true) {
   for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
     const adsetDir = path.join(root, 'assets', 'blog', `0520 ${adsetIndex}번 광고세트-일예산 30만원-이미지 4개 + 영상 1개-익일 05시`);
@@ -346,6 +354,31 @@ test('BLOG_VIDEO uses AD_CREATIVE_COUNT plus one and makes every creative video'
     'video:f_v_b_o_l_0520_4',
     'video:f_v_b_o_l_0520_5',
     'video:f_v_b_o_l_0520_6',
+  ]);
+});
+
+test('BLOG_VIDEO can split flat root videos sequentially by adset', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-flat-plan-'));
+  await createFlatBlogVideoAssets(root, 6);
+  const plan = await buildBlogMixedPlan(blogEnv(root, {
+    CAMPAIGN_MODE: 'BLOG_VIDEO',
+    ADSET_COUNT: '2',
+    AD_CREATIVE_COUNT: '2',
+    BLOG_IMAGE_ADS_PER_ADSET: '0',
+    BLOG_VIDEO_ADS_PER_ADSET: '3',
+    BLOG_TOTAL_ADS_PER_ADSET: '3',
+    BLOG_ADSET_NAME_PREFIX: '',
+  }), { baseDir: root, date: fixedDate });
+
+  assert.deepEqual(plan.adsets[0].ads.map((ad) => path.basename(ad.assetPath)), [
+    'f_v_b_o_l_0520_1.mp4',
+    'f_v_b_o_l_0520_2.mp4',
+    'f_v_b_o_l_0520_3.mp4',
+  ]);
+  assert.deepEqual(plan.adsets[1].ads.map((ad) => path.basename(ad.assetPath)), [
+    'f_v_b_o_l_0520_4.mp4',
+    'f_v_b_o_l_0520_5.mp4',
+    'f_v_b_o_l_0520_6.mp4',
   ]);
 });
 

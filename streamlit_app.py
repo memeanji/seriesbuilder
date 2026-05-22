@@ -753,13 +753,17 @@ if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO"}:
     next_env["BLOG_ASSET_ROOT"] = blog_root
 
     with st.expander("Expected folder names", expanded=True):
-        for index in range(1, int(adset_count) + 1):
-            folder_name = (
-                expected_blog_video_folder_name(index, daily_budget, schedule_time, blog_video_count)
-                if is_blog_video
-                else expected_blog_folder_name(index, daily_budget, schedule_time, blog_image_count)
-            )
-            st.write(f"{index}. `{folder_name}`")
+        if is_blog_video:
+            total_video_count = int(adset_count) * blog_video_count
+            st.write(f"`{blog_root}` 폴더 안의 영상 파일을 파일명 순서대로 읽습니다.")
+            st.write(f"필요 영상 수: `{total_video_count}`개 = 광고세트 `{adset_count}`개 x 세트당 영상 `{blog_video_count}`개")
+            for index in range(1, int(adset_count) + 1):
+                first = ((index - 1) * blog_video_count) + 1
+                last = index * blog_video_count
+                st.write(f"{index}. adset {index}: sorted video #{first} ~ #{last}")
+        else:
+            for index in range(1, int(adset_count) + 1):
+                st.write(f"{index}. `{expected_blog_folder_name(index, daily_budget, schedule_time, blog_image_count)}`")
 
     st.subheader("Landing URLs")
     st.caption("URL은 광고별이 아니라 광고세트 1개당 1개만 입력합니다. 해당 광고세트 안의 모든 소재에 같은 URL이 들어갑니다.")
