@@ -107,7 +107,9 @@ export function buildBlogImageAdName(adIndex, env = process.env, date = new Date
 }
 
 export function buildBlogVideoAdName(adIndex, env = process.env, date = new Date()) {
-  const prefix = env.BLOG_VIDEO_AD_NAME_PREFIX || 'f_v_b_o_l';
+  const prefix = normalizeCampaignMode(env.CAMPAIGN_MODE) === CAMPAIGN_MODES.BLOG_VIDEO_DIRECT
+    ? (env.BLOG_VIDEO_DIRECT_AD_NAME_PREFIX || env.BLOG_VIDEO_AD_NAME_PREFIX_DIRECT || 'f_v_o_l')
+    : (env.BLOG_VIDEO_AD_NAME_PREFIX || 'f_v_b_o_l');
   const today = getTodayString({
     date,
     timezone: env.TIMEZONE || 'Asia/Seoul',

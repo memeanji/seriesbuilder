@@ -112,7 +112,7 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
                 f"BLOG_ADSET_NAME_PREFIX={'f_v_b_o_l' if is_blog_video else 'f_i_b_o_l'}",
                 f"BLOG_ADSET_NAME_TEMPLATE={values.get('BLOG_ADSET_NAME_TEMPLATE', '')}",
                 "BLOG_IMAGE_AD_NAME_PREFIX=f_i_b_o_l",
-                "BLOG_VIDEO_AD_NAME_PREFIX=f_v_b_o_l",
+                f"BLOG_VIDEO_AD_NAME_PREFIX={'f_v_o_l' if is_blog_video and mode == 'BLOG_VIDEO_DIRECT' else 'f_v_b_o_l'}",
                 f"AD_FORMAT={'video' if is_blog_video else 'image'}",
                 "DATE_FORMAT=MMDD",
                 "",
@@ -331,6 +331,11 @@ def build_blog_image_ad_name(index: int) -> str:
 def build_blog_video_ad_name(index: int) -> str:
     mmdd = datetime.now().strftime("%m%d")
     return f"f_v_b_o_l_{mmdd}_{index}"
+
+
+def build_blog_video_direct_ad_name(index: int) -> str:
+    mmdd = datetime.now().strftime("%m%d")
+    return f"f_v_o_l_{mmdd}_{index}"
 
 
 def expected_image_folder_name(adset_index: int, budget: str, creative_count: int, schedule_time: str) -> str:
@@ -807,7 +812,7 @@ if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT"}:
     is_blog_video_direct = campaign_mode == "BLOG_VIDEO_DIRECT"
     st.subheader(campaign_mode)
     st.caption(
-        ("Blog video direct mode: every creative is video, and landing URLs are generated from f_v_b_o_l ad names."
+        ("Blog video direct mode: every creative is video, and landing URLs are generated from f_v_o_l ad names."
          if is_blog_video_direct
          else "Blog video mode: every creative in each adset is video.")
         if is_blog_video
@@ -841,7 +846,7 @@ if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT"}:
             min_value=1,
             max_value=999999,
             value=int(env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")) or "100"),
-            help="자동 랜딩 URL의 /surl/P/{숫자} 부분입니다. utm_campaign은 f_v_b_o_l_MMDD_index 광고명으로 들어갑니다.",
+            help="자동 랜딩 URL의 /surl/P/{숫자} 부분입니다. utm_campaign은 f_v_o_l_MMDD_index 광고명으로 들어갑니다.",
         )
         next_env["LANDING_PATH_NUMBER"] = str(landing_path_number)
     else:
@@ -883,7 +888,8 @@ if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT"}:
             next_env[key] = landing_url
         first_ad_index = ((index - 1) * blog_actual_creative_count) + 1
         image_names = [] if is_blog_video else [build_blog_image_ad_name(first_ad_index + offset) for offset in range(blog_image_count)]
-        video_names = [build_blog_video_ad_name(first_ad_index + blog_image_count + offset) for offset in range(blog_video_count)]
+        video_name_builder = build_blog_video_direct_ad_name if is_blog_video_direct else build_blog_video_ad_name
+        video_names = [video_name_builder(first_ad_index + blog_image_count + offset) for offset in range(blog_video_count)]
         auto_landing_examples = [default_landing_url(name, str(landing_path_number)) for name in video_names[:3]] if is_blog_video_direct else []
         folder_name = (
             expected_blog_video_folder_name(index, daily_budget, schedule_time, blog_video_count)
@@ -922,7 +928,7 @@ if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT"}:
         elif is_blog_video_direct:
             mmdd = datetime.now().strftime("%m%d")
             st.success("Landing URLs will be generated automatically from ad names.")
-            st.write(f"Example: `{default_landing_url(f'f_v_b_o_l_{mmdd}_1', str(landing_path_number))}`")
+            st.write(f"Example: `{default_landing_url(f'f_v_o_l_{mmdd}_1', str(landing_path_number))}`")
         else:
             st.success("All adset landing URLs are ready.")
 elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
