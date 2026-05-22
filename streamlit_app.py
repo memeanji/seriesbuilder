@@ -574,6 +574,8 @@ with st.expander("회사 사람들과 같이 쓰는 방법"):
     )
 
 env = read_env()
+if "resume_mode_enabled" not in st.session_state:
+    st.session_state.resume_mode_enabled = False
 
 with st.expander("공통 wait/retry 설정", expanded=False):
     wait_base_retry_count = st.number_input("기본 재시도 횟수", min_value=1, max_value=20, value=int(env.get("WAIT_BASE_RETRY_COUNT", "5") or "5"))
@@ -602,23 +604,36 @@ with st.expander("실패 지점부터 재실행", expanded=False):
             updated_env.pop("CURRENT_ADSET_NAME", None)
             updated_env.pop("SUMMARY_FILE", None)
             write_env(updated_env)
+            st.session_state.resume_mode_enabled = True
             st.success(f"Resume point saved: {latest_resume['RESUME_FROM_AD_NAME']}")
             st.toast("실패 지점을 .env에 저장했습니다. 새 터미널로 이어서 실행할 수 있어요.")
             st.rerun()
     else:
         st.caption("최근 실패 run-summary를 아직 찾지 못했습니다.")
-    resume_from_ad_index = st.number_input(
+    resume_mode_enabled = st.checkbox(
+        "Resume mode 사용",
+        value=st.session_state.resume_mode_enabled,
+        help="신규 실행이면 반드시 꺼두세요. 켜져 있을 때만 RESUME_FROM_AD_INDEX/NAME이 .env에 저장됩니다.",
+    )
+    st.session_state.resume_mode_enabled = resume_mode_enabled
+    resume_from_ad_index_input = st.number_input(
         "Resume from ad index",
         min_value=1,
         max_value=1000,
         value=int(env.get("RESUME_FROM_AD_INDEX", "1") or "1"),
+        disabled=not resume_mode_enabled,
         help="예: f_i_o_l_0522_2에서 실패했다면 2를 입력합니다. 1이면 처음부터 진행합니다.",
     )
-    resume_from_ad_name = st.text_input(
+    resume_from_ad_name_input = st.text_input(
         "Resume from ad name",
         value=env.get("RESUME_FROM_AD_NAME", ""),
+        disabled=not resume_mode_enabled,
         help="광고명이 명확하면 입력하세요. 예: f_i_o_l_0522_2. 인덱스보다 광고명 매칭을 우선 보조로 사용합니다.",
     )
+    resume_from_ad_index = resume_from_ad_index_input if resume_mode_enabled else 1
+    resume_from_ad_name = resume_from_ad_name_input if resume_mode_enabled else ""
+    if not resume_mode_enabled and (env.get("RESUME_FROM_AD_NAME") or env.get("RESUME_FROM_AD_INDEX", "1") not in {"", "1"}):
+        st.warning("현재 화면은 신규 실행 모드입니다. Save .env를 누르면 남아 있던 resume 값이 비워집니다.")
     st.info("재실행 전에는 Meta 화면에서 실패한 캠페인 편집 화면이 열려 있거나, 기존 자동화가 해당 캠페인을 다시 열 수 있는 상태여야 합니다.")
 
 with st.sidebar:
