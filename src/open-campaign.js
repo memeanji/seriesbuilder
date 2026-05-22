@@ -1247,10 +1247,11 @@ async function fillAdsetDailyBudgetAfterSchedule(page) {
     return true;
   }
 
-  const filled = await fillInputHandle(page, budgetInputHandle, ADSET_DAILY_BUDGET, 'daily budget');
-  if (!filled) {
+  const formattedBudget = formatBudgetForMetaInput(ADSET_DAILY_BUDGET);
+  const filled = await fillCurrencyInputHandle(page, budgetInputHandle, formattedBudget, 'daily budget');
+  if (!filled.ok) {
     await debugDump(page, 'daily budget input fill mismatch');
-    throw new Error(`ADSET_DAILY_BUDGET fill failed: expected=${ADSET_DAILY_BUDGET}`);
+    throw new Error(`ADSET_DAILY_BUDGET fill failed: expected=${formattedBudget}, actual=${filled.actual}`);
   }
 
   await pause(page, 'daily budget input applied', 2000);
