@@ -1576,6 +1576,35 @@ async function findDuplicateCountInputHandle(page) {
   return input;
 }
 
+async function focusDuplicateInputReliably(page, duplicateInput) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await duplicateInput.click({ force: true, timeout: 5000 });
+      return true;
+    } catch (error) {
+      console.log('[WARN] duplicate input force click failed:', { attempt, error: error.message });
+      const box = await duplicateInput.boundingBox().catch(() => null);
+      if (box) {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2).catch((mouseError) => {
+          console.log('[WARN] duplicate input mouse click failed:', { attempt, error: mouseError.message });
+        });
+        const focusedByMouse = await duplicateInput.evaluate((el) => document.activeElement === el).catch(() => false);
+        if (focusedByMouse) return true;
+      }
+      const focusedByDom = await duplicateInput.evaluate((el) => {
+        el.scrollIntoView({ block: 'center', inline: 'center' });
+        el.focus();
+        return document.activeElement === el;
+      }).catch(() => false);
+      if (focusedByDom) return true;
+      await page.waitForTimeout(1000);
+    }
+  }
+
+  console.log('[WARN] duplicate input click/focus remained blocked - continuing with DOM value fallback');
+  return false;
+}
+
 async function setDuplicateCount(page, count = 9, adsetName) {
   console.log('[STEP] 복제 옵션 버튼 검색:', { adsetName, count });
 
@@ -1605,7 +1634,7 @@ async function setDuplicateCount(page, count = 9, adsetName) {
     throw new Error('복제 개수 input을 찾지 못했습니다.');
   }
 
-  await duplicateInput.click();
+  await focusDuplicateInputReliably(page, duplicateInput);
   await page.waitForTimeout(200);
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
   await page.waitForTimeout(100);
