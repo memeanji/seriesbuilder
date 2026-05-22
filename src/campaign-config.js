@@ -5,6 +5,7 @@ export const CAMPAIGN_MODES = {
   IMAGE_ONLY: 'IMAGE_ONLY',
   BLOG_MIXED: 'BLOG_MIXED',
   BLOG_VIDEO: 'BLOG_VIDEO',
+  BLOG_VIDEO_DIRECT: 'BLOG_VIDEO_DIRECT',
   VIDEO_ONLY: 'VIDEO_ONLY',
   VIDEO_ONLY_CBO: 'VIDEO_ONLY_CBO',
   IMAGE_ONLY_CBO: 'IMAGE_ONLY_CBO',
@@ -27,6 +28,9 @@ export function normalizeCampaignMode(value) {
   if (['BLOG_VIDEO', 'BLOG_VIDEO_CAMPAIGN', 'BLOG_VIDEO_ONLY', 'BLOG_ONLY_VIDEO'].includes(normalized)) {
     return CAMPAIGN_MODES.BLOG_VIDEO;
   }
+  if (['BLOG_VIDEO_DIRECT', 'BLOG_VIDEO_DIRECT_CAMPAIGN', 'BLOG_DIRECT_VIDEO', 'VIDEO_BLOG_DIRECT'].includes(normalized)) {
+    return CAMPAIGN_MODES.BLOG_VIDEO_DIRECT;
+  }
   if (['VIDEO', 'VIDEO_ONLY', 'VIDEO_CAMPAIGN', 'VIDEO_ONLY_CAMPAIGN'].includes(normalized)) {
     return CAMPAIGN_MODES.VIDEO_ONLY;
   }
@@ -44,7 +48,7 @@ export function isBlogMixedMode(mode) {
 }
 
 export function isBlogVideoMode(mode) {
-  return normalizeCampaignMode(mode) === CAMPAIGN_MODES.BLOG_VIDEO;
+  return [CAMPAIGN_MODES.BLOG_VIDEO, CAMPAIGN_MODES.BLOG_VIDEO_DIRECT].includes(normalizeCampaignMode(mode));
 }
 
 export function readIntegerEnv(env, key, defaultValue) {
@@ -556,7 +560,8 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
   const baseDir = options.baseDir || process.cwd();
   const date = options.date || new Date();
   const mode = normalizeCampaignMode(env.CAMPAIGN_MODE);
-  const isBlogVideo = mode === CAMPAIGN_MODES.BLOG_VIDEO;
+  const isBlogVideo = [CAMPAIGN_MODES.BLOG_VIDEO, CAMPAIGN_MODES.BLOG_VIDEO_DIRECT].includes(mode);
+  const isBlogVideoDirect = mode === CAMPAIGN_MODES.BLOG_VIDEO_DIRECT;
   const adsetCount = readIntegerEnv(env, 'ADSET_COUNT', 1);
   const fallbackTotalAdsPerAdset = readIntegerEnv(
     env,
@@ -581,7 +586,7 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
 
   const adsets = [];
   for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
-    const landingUrl = getLandingUrlForAdset(adsetIndex, env);
+    const landingUrl = isBlogVideoDirect ? '' : getLandingUrlForAdset(adsetIndex, env);
     const imageAssets = await getImageAssetsForAdset(adsetIndex, env, { baseDir });
     const videoAssets = isBlogVideo
       ? await getBlogVideoAssetsForAdset(adsetIndex, totalAdsPerAdset, env, { baseDir })
@@ -636,17 +641,19 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
     for (let videoIndex = 1; videoIndex <= videoAdsPerAdset; videoIndex += 1) {
       const videoAdIndex = adIndexBase + imageAdsPerAdset + videoIndex;
       const currentVideoAsset = videoAssets[videoIndex - 1];
+      const videoAdName = buildBlogVideoAdName(videoAdIndex, env, date);
+      const videoLandingUrl = isBlogVideoDirect ? getVideoOnlyLandingUrl(videoAdName, env) : landingUrl;
       ads.push({
         type: 'video',
         index: videoAdIndex,
         adsetLocalIndex: imageAdsPerAdset + videoIndex,
-        name: buildBlogVideoAdName(videoAdIndex, env, date),
+        name: videoAdName,
         assetPath: currentVideoAsset,
-        landingUrl,
+        landingUrl: videoLandingUrl,
         creativePayload: buildVideoCreativePayload({
           videoAsset: currentVideoAsset,
           thumbnailAsset: env[`BLOG_ADSET_${adsetIndex}_VIDEO_THUMBNAIL`] || env.BLOG_VIDEO_THUMBNAIL || '',
-          landingUrl,
+          landingUrl: videoLandingUrl,
         }),
       });
     }
@@ -654,7 +661,7 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
     adsets.push({
       index: adsetIndex,
       name: buildBlogAdsetName(adsetIndex, env, date),
-      landingUrl,
+      landingUrl: isBlogVideoDirect ? '(auto per ad)' : landingUrl,
       imageAssets,
       videoAsset,
       videoAssets,

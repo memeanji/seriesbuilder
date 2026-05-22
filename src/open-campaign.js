@@ -61,6 +61,7 @@ const WAIT_CONFIG = {
   modeOverrides: {
     [CAMPAIGN_MODES.BLOG_MIXED]: Number(process.env.MODE_01_WAIT_MS || process.env.BLOG_MIXED_WAIT_MS || 10_000),
     [CAMPAIGN_MODES.BLOG_VIDEO]: Number(process.env.MODE_BLOG_VIDEO_WAIT_MS || process.env.BLOG_VIDEO_WAIT_MS || 12_000),
+    [CAMPAIGN_MODES.BLOG_VIDEO_DIRECT]: Number(process.env.MODE_BLOG_VIDEO_WAIT_MS || process.env.BLOG_VIDEO_DIRECT_WAIT_MS || process.env.BLOG_VIDEO_WAIT_MS || 12_000),
     [CAMPAIGN_MODES.IMAGE_ONLY]: Number(process.env.MODE_02_WAIT_MS || process.env.IMAGE_ONLY_WAIT_MS || 5_000),
     [CAMPAIGN_MODES.VIDEO_ONLY_CBO]: Number(process.env.MODE_03_WAIT_MS || process.env.VIDEO_ONLY_CBO_WAIT_MS || 12_000),
     [CAMPAIGN_MODES.IMAGE_ONLY_CBO]: Number(process.env.MODE_04_WAIT_MS || process.env.IMAGE_ONLY_CBO_WAIT_MS || 6_000),
@@ -470,7 +471,7 @@ function isBlogMixedCampaign() {
 }
 
 function isBlogVideoCampaign() {
-  return CAMPAIGN_MODE === CAMPAIGN_MODES.BLOG_VIDEO;
+  return [CAMPAIGN_MODES.BLOG_VIDEO, CAMPAIGN_MODES.BLOG_VIDEO_DIRECT].includes(CAMPAIGN_MODE);
 }
 
 function isBlogCampaign() {
@@ -500,7 +501,7 @@ function normalizeText(value) {
 function normalizeAdFormat(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (['video', 'movie', '동영상', '영상'].includes(normalized)) return 'video';
-  if ([CAMPAIGN_MODES.BLOG_VIDEO, CAMPAIGN_MODES.VIDEO_ONLY, CAMPAIGN_MODES.VIDEO_ONLY_CBO].includes(normalizeCampaignMode(process.env.CAMPAIGN_MODE))) return 'video';
+  if ([CAMPAIGN_MODES.BLOG_VIDEO, CAMPAIGN_MODES.BLOG_VIDEO_DIRECT, CAMPAIGN_MODES.VIDEO_ONLY, CAMPAIGN_MODES.VIDEO_ONLY_CBO].includes(normalizeCampaignMode(process.env.CAMPAIGN_MODE))) return 'video';
   return 'image';
 }
 
@@ -4590,7 +4591,7 @@ async function main() {
 
     if (DRY_RUN) {
       updateRunContext({ current_step: 'dry_run' });
-      if ([CAMPAIGN_MODES.BLOG_MIXED, CAMPAIGN_MODES.BLOG_VIDEO, CAMPAIGN_MODES.VIDEO_ONLY, CAMPAIGN_MODES.VIDEO_ONLY_CBO, CAMPAIGN_MODES.IMAGE_ONLY_CBO].includes(validation.mode)) {
+      if ([CAMPAIGN_MODES.BLOG_MIXED, CAMPAIGN_MODES.BLOG_VIDEO, CAMPAIGN_MODES.BLOG_VIDEO_DIRECT, CAMPAIGN_MODES.VIDEO_ONLY, CAMPAIGN_MODES.VIDEO_ONLY_CBO, CAMPAIGN_MODES.IMAGE_ONLY_CBO].includes(validation.mode)) {
         console.log(formatDryRunPlan(activeCampaignPlan));
       } else if (activeCampaignPlan?.uploadMode === 'PER_AD') {
         console.log('[DRY RUN] Meta Ads Automation plan');

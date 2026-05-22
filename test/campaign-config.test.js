@@ -414,6 +414,36 @@ test('BLOG_VIDEO allows AD_CREATIVE_COUNT zero for one video creative per adset'
   ]);
 });
 
+test('BLOG_VIDEO_DIRECT generates landing URLs from f_v_b_o_l ad names', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-direct-plan-'));
+  await createFlatBlogVideoAssets(root, 2);
+  const plan = await buildBlogMixedPlan(blogEnv(root, {
+    CAMPAIGN_MODE: 'BLOG_VIDEO_DIRECT',
+    ADSET_COUNT: '2',
+    AD_CREATIVE_COUNT: '0',
+    BLOG_IMAGE_ADS_PER_ADSET: '0',
+    BLOG_VIDEO_ADS_PER_ADSET: '1',
+    BLOG_TOTAL_ADS_PER_ADSET: '1',
+    BLOG_ADSET_NAME_TEMPLATE: '직접 영상 {index}번',
+    LANDING_PATH_NUMBER: '99',
+    BLOG_LANDING_URL_1: '',
+    BLOG_LANDING_URL_2: '',
+  }), { baseDir: root, date: fixedDate });
+
+  assert.equal(normalizeCampaignMode('BLOG_VIDEO_DIRECT'), CAMPAIGN_MODES.BLOG_VIDEO_DIRECT);
+  assert.equal(plan.mode, CAMPAIGN_MODES.BLOG_VIDEO_DIRECT);
+  assert.equal(plan.adsets[0].landingUrl, '(auto per ad)');
+  assert.equal(plan.adsets[0].ads[0].name, 'f_v_b_o_l_0520_1');
+  assert.equal(
+    plan.adsets[0].ads[0].landingUrl,
+    'https://repurely.com/surl/P/99?utm_source=f&utm_medium=f&utm_campaign=f_v_b_o_l_0520_1',
+  );
+  assert.equal(
+    plan.adsets[1].ads[0].landingUrl,
+    'https://repurely.com/surl/P/99?utm_source=f&utm_medium=f&utm_campaign=f_v_b_o_l_0520_2',
+  );
+});
+
 test('VIDEO_ONLY naming and landing URL use MMDD ad index', () => {
   const env = {
     CAMPAIGN_MODE: 'VIDEO_ONLY',
