@@ -72,6 +72,8 @@ let activeCampaignPlan = null;
 let imageOnlyPerAdAssets = [];
 let videoOnlyAssets = [];
 let videoOnlyCboInitialCreateClicked = false;
+const performanceEntries = [];
+const waitTimeoutEntries = [];
 const runContext = {
   campaign_mode: CAMPAIGN_MODE,
   campaign_name: CAMPAIGN_NAME,
@@ -107,6 +109,88 @@ const PATHS = {
 
 function updateRunContext(patch) {
   Object.assign(runContext, patch);
+}
+
+function currentPerfItem(fallback = '') {
+  return fallback || runContext.current_ad_name || runContext.current_video_file || runContext.current_adset_name || runContext.campaign_name || '';
+}
+
+function formatDuration(ms) {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function startPerfStep(step, item = '') {
+  const entry = {
+    step,
+    item: currentPerfItem(item),
+    campaign_mode: CAMPAIGN_MODE,
+    campaign_name: runContext.campaign_name || CAMPAIGN_NAME || '',
+    adset: runContext.current_adset_name || '',
+    started_at: new Date().toISOString(),
+    started_ms: Date.now(),
+    status: 'running',
+  };
+  console.log(`[PERF] [${entry.item || '-'}] ${step} started`);
+  return (status = 'success', extra = {}) => {
+    entry.ended_at = new Date().toISOString();
+    entry.duration_ms = Date.now() - entry.started_ms;
+    entry.duration_sec = Number((entry.duration_ms / 1000).toFixed(3));
+    entry.status = status;
+    Object.assign(entry, extra);
+    performanceEntries.push(entry);
+    console.log(`[PERF] [${entry.item || '-'}] ${step} ${status === 'success' ? 'done' : 'failed'} - ${formatDuration(entry.duration_ms)}`);
+    return entry;
+  };
+}
+
+async function timedStep(step, item, fn) {
+  const endPerf = startPerfStep(step, item);
+  try {
+    const result = await fn();
+    endPerf('success');
+    return result;
+  } catch (error) {
+    endPerf('failed', { error: error.message });
+    throw error;
+  }
+}
+
+function getWaitTimeoutLocation() {
+  const stack = new Error().stack || '';
+  const line = stack
+    .split('\n')
+    .map((value) => value.trim())
+    .find((value) => value.includes('open-campaign.js') && !value.includes('getWaitTimeoutLocation') && !value.includes('page.waitForTimeout'));
+  return line || '';
+}
+
+function classifyWaitTimeout(ms, location = '', nearby = '') {
+  const text = `${location} ${nearby}`.toLowerCase();
+  if (text.includes('video') || text.includes('upload') || text.includes('media') || ms >= 30000) return '영상 소재일 때만 필요';
+  if (text.includes('locator') || text.includes('button') || text.includes('input') || text.includes('visible') || text.includes('search')) return 'locator.waitFor로 대체 가능';
+  if (ms <= 700) return '삭제 가능';
+  return '필요';
+}
+
+function installWaitForTimeoutProfiler(page) {
+  if (page.__metaWaitProfilerInstalled) return;
+  const originalWaitForTimeout = page.waitForTimeout.bind(page);
+  page.waitForTimeout = async (ms, ...args) => {
+    const location = getWaitTimeoutLocation();
+    const entry = {
+      ms,
+      sec: Number((ms / 1000).toFixed(3)),
+      classification: classifyWaitTimeout(ms, location),
+      location,
+      current_step: runContext.current_step,
+      item: currentPerfItem(),
+      campaign_mode: CAMPAIGN_MODE,
+      at: new Date().toISOString(),
+    };
+    waitTimeoutEntries.push(entry);
+    return originalWaitForTimeout(ms, ...args);
+  };
+  page.__metaWaitProfilerInstalled = true;
 }
 
 function getPlanAdsetCount() {
@@ -217,6 +301,116 @@ async function writeRunSummaryLog(status, error = null) {
   return logPath;
 }
 
+function summarizeStepStats(entries) {
+  const grouped = new Map();
+  for (const entry of entries) {
+    const current = grouped.get(entry.step) || {
+      step: entry.step,
+      count: 0,
+      success_count: 0,
+      failed_count: 0,
+      total_ms: 0,
+      max_ms: 0,
+      max_item: '',
+    };
+    current.count += 1;
+    current.success_count += entry.status === 'success' ? 1 : 0;
+    current.failed_count += entry.status === 'failed' ? 1 : 0;
+    current.total_ms += entry.duration_ms || 0;
+    if ((entry.duration_ms || 0) > current.max_ms) {
+      current.max_ms = entry.duration_ms || 0;
+      current.max_item = entry.item || '';
+    }
+    grouped.set(entry.step, current);
+  }
+  return [...grouped.values()]
+    .map((item) => ({
+      ...item,
+      avg_ms: Math.round(item.total_ms / Math.max(item.count, 1)),
+      avg_sec: Number((item.total_ms / Math.max(item.count, 1) / 1000).toFixed(3)),
+      max_sec: Number((item.max_ms / 1000).toFixed(3)),
+    }))
+    .sort((a, b) => b.avg_ms - a.avg_ms);
+}
+
+function summarizeSlowItems(entries) {
+  const grouped = new Map();
+  for (const entry of entries) {
+    if (!entry.item) continue;
+    const current = grouped.get(entry.item) || { item: entry.item, total_ms: 0, steps: 0, failed_steps: 0 };
+    current.total_ms += entry.duration_ms || 0;
+    current.steps += 1;
+    current.failed_steps += entry.status === 'failed' ? 1 : 0;
+    grouped.set(entry.item, current);
+  }
+  return [...grouped.values()]
+    .map((item) => ({ ...item, total_sec: Number((item.total_ms / 1000).toFixed(3)) }))
+    .sort((a, b) => b.total_ms - a.total_ms)
+    .slice(0, 5);
+}
+
+async function collectWaitForTimeoutAudit() {
+  const sourcePath = new URL(import.meta.url);
+  const source = await fs.readFile(sourcePath, 'utf-8').catch(() => '');
+  const lines = source.split(/\r?\n/);
+  const audit = [];
+  let currentFunction = '';
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const fnMatch = line.match(/^(?:async\s+)?function\s+([A-Za-z0-9_]+)/) || line.match(/^async\s+function\s+([A-Za-z0-9_]+)/);
+    if (fnMatch) currentFunction = fnMatch[1];
+    if (!line.includes('waitForTimeout')) continue;
+    const nearby = lines.slice(Math.max(0, index - 3), Math.min(lines.length, index + 4)).join(' ');
+    const msMatch = line.match(/waitForTimeout\(([^)]+)\)/);
+    const waitExpression = msMatch?.[1]?.trim() || '';
+    audit.push({
+      file: 'src/open-campaign.js',
+      line: index + 1,
+      function: currentFunction,
+      wait_expression: waitExpression,
+      classification: classifyWaitTimeout(Number(waitExpression) || 0, currentFunction, nearby),
+      code: line.trim(),
+    });
+  }
+  return audit;
+}
+
+async function writePerformanceReport(status, tracePath = '', error = null) {
+  await fs.mkdir(path.resolve('logs'), { recursive: true });
+  const reportPath = path.resolve('logs', 'performance_report.json');
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const historyPath = path.resolve('logs', `performance-report-${timestamp}.json`);
+  const staticWaitAudit = await collectWaitForTimeoutAudit();
+  const slowestSteps = [...performanceEntries]
+    .sort((a, b) => (b.duration_ms || 0) - (a.duration_ms || 0))
+    .slice(0, 5);
+  const unnecessaryFixedWaits = staticWaitAudit.filter((item) => ['삭제 가능', 'locator.waitFor로 대체 가능'].includes(item.classification));
+  const payload = {
+    status,
+    generated_at: new Date().toISOString(),
+    campaign_mode: CAMPAIGN_MODE,
+    campaign_name: runContext.campaign_name || CAMPAIGN_NAME || '',
+    trace_path: tracePath,
+    error: error ? { message: error.message, name: error.name } : null,
+    step_summary: summarizeStepStats(performanceEntries),
+    slowest_items_top5: summarizeSlowItems(performanceEntries),
+    slowest_steps_top5: slowestSteps,
+    fixed_wait_runtime: waitTimeoutEntries,
+    wait_for_timeout_audit: staticWaitAudit,
+    unnecessary_fixed_waits: unnecessaryFixedWaits,
+    suggestions: [
+      '우선 unnecessary_fixed_waits 중 locator.waitFor로 대체 가능 항목부터 화면 반영 조건 기반 대기로 바꾸세요.',
+      '영상 업로드/Meta 저장 직후 wait은 안정성 영향이 크므로 가장 마지막에 줄이세요.',
+      'slowest_steps_top5에서 반복적으로 느린 step을 먼저 개선하세요.',
+      'trace_path를 Playwright Trace Viewer에서 열어 실제 액션 대기 지점을 확인하세요.',
+    ],
+  };
+  await fs.writeFile(reportPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8');
+  await fs.writeFile(historyPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8');
+  console.log('[LOG] performance report saved:', reportPath);
+  return reportPath;
+}
+
 function validateEnv() {
   if (!DRY_RUN && !AD_ACCOUNT_ID) throw new Error('AD_ACCOUNT_ID is missing in .env');
   if (!CAMPAIGN_NAME) throw new Error('CAMPAIGN_NAME is missing in .env');
@@ -315,7 +509,9 @@ async function ensureDirs() {
 
 async function pause(page, label, ms = 2000) {
   console.log(`[PAUSE] ${label} - ${ms}ms`);
+  const endPerf = startPerfStep(`fixed_wait:${label}`, currentPerfItem());
   await page.waitForTimeout(ms);
+  endPerf('success', { wait_ms: ms });
 }
 
 async function hasLargeUploadFile(files, limitBytes = 50 * 1024 * 1024) {
@@ -3925,7 +4121,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           current_video_file: targetAdFormat === 'video' ? targetAssetPath : '',
         });
 
-        await fillAdNameAndVerify(page, adNameInput, targetAdName);
+        await timedStep('input_ad_name', targetAdName, () => fillAdNameAndVerify(page, adNameInput, targetAdName));
 
         console.log('[STEP] ad creative plan:', {
           campaignMode: CAMPAIGN_MODE,
@@ -3937,17 +4133,17 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           targetAssetPath,
         });
 
-        await fillLandingUrlOnly(page, targetAdName, targetLandingUrl);
+        await timedStep('input_url', targetAdName, () => fillLandingUrlOnly(page, targetAdName, targetLandingUrl));
         await page.waitForTimeout(5000);
         console.log('[STEP] landing URL step completed and stabilized:', { targetAdName });
 
-        await enterCreativeInsideEditor(page, targetAdFormat);
+        await timedStep('open_creative_settings', targetAdName, () => enterCreativeInsideEditor(page, targetAdFormat));
         await page.waitForTimeout(5000);
         console.log('[STEP] creative format step completed:', { targetAdName, targetAdFormat });
 
         if (isBlogMixedCampaign() || isVideoOnlyCampaign() || isCboCampaign()) {
           await page.waitForTimeout(5000);
-          await attachMediaFromFolderIfConfigured(page, targetAdName, [targetAssetPath], targetAdFormat);
+          await timedStep(targetAdFormat === 'video' ? 'upload_video' : 'upload_image', targetAdName, () => attachMediaFromFolderIfConfigured(page, targetAdName, [targetAssetPath], targetAdFormat));
           console.log('[STEP] planned media upload completed:', {
             campaignMode: CAMPAIGN_MODE,
             targetAdName,
@@ -3960,19 +4156,19 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
             throw new Error(`IMAGE_ONLY per-ad image asset not found for ad sequence ${adCreativeIndex}.`);
           }
           await page.waitForTimeout(3000);
-          await attachMediaFromFolderIfConfigured(page, targetAdName, [imageAssetPath], 'image');
+          await timedStep('upload_image', targetAdName, () => attachMediaFromFolderIfConfigured(page, targetAdName, [imageAssetPath], 'image'));
           console.log('[STEP] IMAGE_ONLY PER_AD media upload completed:', {
             targetAdName,
             targetAssetPath: imageAssetPath,
           });
         } else if (adCreativeIndex === 1 && !firstCreativeMediaUploaded) {
           await page.waitForTimeout(5000);
-          await attachMediaFromFolderIfConfigured(page, targetAdName);
+          await timedStep('upload_media', targetAdName, () => attachMediaFromFolderIfConfigured(page, targetAdName));
           firstCreativeMediaUploaded = true;
           console.log('[STEP] first ad media upload completed');
         } else {
           await page.waitForTimeout(3000);
-          await searchAndSelectExistingMedia(page, targetAdName);
+          await timedStep('select_existing_media', targetAdName, () => searchAndSelectExistingMedia(page, targetAdName));
           console.log('[STEP] existing uploaded media selected:', { targetAdName });
         }
 
@@ -4047,12 +4243,12 @@ async function runFlow(page) {
 
   updateRunContext({ current_step: 'ads_manager_open' });
   console.log('[STEP] Ads Manager 접속');
-  await page.goto('https://adsmanager.facebook.com/adsmanager/manage/campaigns', { waitUntil: 'domcontentloaded' });
-  await ensureLoggedInOrThrow(page);
+  await timedStep('open_ads_manager', CAMPAIGN_NAME, () => page.goto('https://adsmanager.facebook.com/adsmanager/manage/campaigns', { waitUntil: 'domcontentloaded' }));
+  await timedStep('check_login', CAMPAIGN_NAME, () => ensureLoggedInOrThrow(page));
   await safeScreenshot(page, PATHS.step1, 'page screenshot');
 
   console.log(`[STEP] 광고계정 이동: act=${AD_ACCOUNT_ID}`);
-  await page.goto(`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${AD_ACCOUNT_ID}`, { waitUntil: 'domcontentloaded' });
+  await timedStep('open_ad_account', CAMPAIGN_NAME, () => page.goto(`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${AD_ACCOUNT_ID}`, { waitUntil: 'domcontentloaded' }));
   await pause(page, '광고계정 이동 후 대기', 3000);
   console.log('[DEBUG] URL:', page.url());
   console.log('[DEBUG] TITLE:', await page.title());
@@ -4061,23 +4257,23 @@ async function runFlow(page) {
   if (isCboCampaign()) {
     updateRunContext({ current_step: 'cbo_campaign_create' });
     console.log(`[STEP] ${CAMPAIGN_MODE} campaign creation mode`);
-    await clickRealCreateButton(page);
+    await timedStep('click_create_campaign', CAMPAIGN_NAME, () => clickRealCreateButton(page));
     videoOnlyCboInitialCreateClicked = true;
     await safeScreenshot(page, PATHS.step5, 'page screenshot');
-    await selectSalesObjective(page);
-    await clickCampaignContinueButton(page);
-    await fillCampaignName(page, activeCampaignPlan.campaignName);
-    await fillCampaignBudget(page, activeCampaignPlan.rawCampaignBudget);
+    await timedStep('select_sales_objective', CAMPAIGN_NAME, () => selectSalesObjective(page));
+    await timedStep('click_continue', CAMPAIGN_NAME, () => clickCampaignContinueButton(page));
+    await timedStep('fill_campaign_name', activeCampaignPlan.campaignName, () => fillCampaignName(page, activeCampaignPlan.campaignName));
+    await timedStep('fill_campaign_budget', activeCampaignPlan.campaignName, () => fillCampaignBudget(page, activeCampaignPlan.rawCampaignBudget));
     await safeScreenshot(page, path.join(DIRS.screenshots, 'cbo-campaign-name-budget-filled.png'), 'cbo campaign name budget filled');
   } else {
-    await trySearchBox(page, CAMPAIGN_NAME);
-  const campaignTarget = await findCampaignTarget(page, CAMPAIGN_NAME);
+    await timedStep('search_campaign', CAMPAIGN_NAME, () => trySearchBox(page, CAMPAIGN_NAME));
+  const campaignTarget = await timedStep('find_campaign', CAMPAIGN_NAME, () => findCampaignTarget(page, CAMPAIGN_NAME));
   if (!campaignTarget) {
     await logCampaignCandidates(page, 10);
     throw new Error(`CAMPAIGN_NAME partial match 실패: ${CAMPAIGN_NAME}`);
   }
 
-  await campaignTarget.click();
+  await timedStep('open_campaign', CAMPAIGN_NAME, () => campaignTarget.click());
   await safeScreenshot(page, PATHS.step3, 'page screenshot');
   await page.waitForLoadState('domcontentloaded');
   await safeScreenshot(page, PATHS.step4, 'page screenshot');
@@ -4100,25 +4296,25 @@ async function runFlow(page) {
     });
 
     if (!isCboCampaign()) {
-      await clickRealCreateButton(page);
+      await timedStep('click_create_adset', adsetName, () => clickRealCreateButton(page));
       await pause(page, '만들기 버튼 클릭 후 대기', 3000);
       await safeScreenshot(page, PATHS.step5, 'page screenshot');
     }
-    await enterAdsetFlow(page);
+    await timedStep('enter_adset_flow', adsetName, () => enterAdsetFlow(page));
     await pause(page, '광고 세트 생성 화면 진입 후 대기', 3000);
     await safeScreenshot(page, PATHS.step6, 'page screenshot');
 
     if (isCboCampaign()) {
       console.log('[STEP] CBO adset selected after campaign budget; fill adset name then schedule');
     }
-    await fillAdsetNameInAdsetModalOnly(page, adsetName);
+    await timedStep('fill_adset_name', adsetName, () => fillAdsetNameInAdsetModalOnly(page, adsetName));
 
-    const scheduleReady = await updateDateAndTimeBeforeContinue(page);
+    const scheduleReady = await timedStep('schedule_adset', adsetName, () => updateDateAndTimeBeforeContinue(page));
     if (!scheduleReady) {
       throw new Error('스케줄링 영역 확인 실패: 날짜 input을 찾지 못했습니다.');
     }
     if (!isCboCampaign()) {
-      await fillAdsetDailyBudgetAfterSchedule(page);
+      await timedStep('fill_adset_budget', adsetName, () => fillAdsetDailyBudgetAfterSchedule(page));
     } else {
       console.log('[STEP] CBO keeps campaign budget unchanged; adset budget fill skipped');
     }
@@ -4129,7 +4325,7 @@ async function runFlow(page) {
     if (adCreativeDuplicateCount > 0) {
       updateRunContext({ current_step: 'duplicate_ads' });
       await pause(page, '스케줄링 후 새 판매 광고 복제 설정 전 대기', 5000);
-      await setDuplicateCount(page, adCreativeDuplicateCount, '새 판매 광고');
+      await timedStep('duplicate_ads', adsetName, () => setDuplicateCount(page, adCreativeDuplicateCount, '새 판매 광고'));
       await pause(page, '새 판매 광고 복제 설정 후 대기', 7000);
     }
 
@@ -4139,13 +4335,13 @@ async function runFlow(page) {
     if (adsetDuplicateCount > 0) {
       updateRunContext({ current_step: 'duplicate_adsets' });
       await pause(page, '스케줄링 후 광고세트 복제 설정 전 대기', 5000);
-      await setDuplicateCount(page, adsetDuplicateCount, adsetName);
+      await timedStep('duplicate_adsets', adsetName, () => setDuplicateCount(page, adsetDuplicateCount, adsetName));
       await pause(page, '광고세트 복제 설정 후 대기', 7000);
     }
 
     if (n === 0) {
       updateRunContext({ current_step: 'rename_ads_and_upload_media' });
-      await renameAdsetsAndAdsSequentially(page, (isBlogMixedCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount);
+      await timedStep('rename_ads_and_upload_media', adsetName, () => renameAdsetsAndAdsSequentially(page, (isBlogMixedCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount));
     }
 
   }
@@ -4158,11 +4354,17 @@ async function main() {
   let browser = null;
   let status = 'success';
   let summaryLogPath = '';
+  let context = null;
+  let tracePath = '';
+  let traceStarted = false;
+  let caughtError = null;
 
   try {
     updateRunContext({ current_step: 'validate_config' });
-    validateEnv();
-    const validation = await validateCampaignConfig(process.env, { baseDir: process.cwd() });
+    const validation = await timedStep('validate_config', CAMPAIGN_NAME, async () => {
+      validateEnv();
+      return validateCampaignConfig(process.env, { baseDir: process.cwd() });
+    });
     activeCampaignPlan = validation.plan;
     updateRunContext({
       campaign_mode: validation.mode,
@@ -4214,12 +4416,19 @@ async function main() {
     await ensureDirs();
     updateRunContext({ current_step: 'connect_chrome' });
     console.log(`[OPEN] attaching to existing Chrome session via CDP: ${CDP_URL}`);
-    browser = await chromium.connectOverCDP(CDP_URL);
+    browser = await timedStep('connect_chrome', CAMPAIGN_NAME, () => chromium.connectOverCDP(CDP_URL));
 
-    const context = browser.contexts()[0];
+    context = browser.contexts()[0];
     if (!context) throw new Error('연결된 Chrome context가 없습니다.');
     const page = context.pages()[0] ?? (await context.newPage());
-    await runFlow(page);
+    installWaitForTimeoutProfiler(page);
+    await fs.mkdir(path.resolve('logs'), { recursive: true });
+    tracePath = path.resolve('logs', `trace-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`);
+    await context.tracing.start({ screenshots: true, snapshots: true, sources: true }).then(() => {
+      traceStarted = true;
+      console.log('[TRACE] playwright tracing started:', tracePath);
+    }).catch((error) => console.warn('[WARN] trace start failed:', error.message));
+    await timedStep('run_flow', CAMPAIGN_NAME, () => runFlow(page));
 
     summaryLogPath = await writeRunSummaryLog('success');
     await notifySuccess(
@@ -4227,6 +4436,7 @@ async function main() {
       `Campaign: ${runContext.campaign_name}\nAdsets: ${runContext.created_adset_count}\nAds: ${runContext.created_ad_count}\nLog: ${summaryLogPath}`,
     );
   } catch (error) {
+    caughtError = error;
     status = classifyAutomationError(error);
     console.error('[OPEN] 실행 실패:', error);
 
@@ -4248,6 +4458,17 @@ async function main() {
     }
     throw error;
   } finally {
+    if (traceStarted && context) {
+      await context.tracing.stop({ path: tracePath }).then(() => {
+        console.log('[TRACE] playwright trace saved:', tracePath);
+      }).catch((error) => {
+        console.warn('[WARN] trace stop failed:', error.message);
+        tracePath = '';
+      });
+    }
+    await writePerformanceReport(status, tracePath, caughtError).catch((error) => {
+      console.warn('[WARN] performance report failed:', error.message);
+    });
     if (browser) await browser.close().catch(() => null);
   }
 }
