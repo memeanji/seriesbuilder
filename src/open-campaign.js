@@ -59,10 +59,10 @@ const WAIT_CONFIG = {
   videoUploadTimeoutMs: Number(process.env.VIDEO_UPLOAD_TIMEOUT_MS || 180_000),
   videoFallbackWaitMs: Number(process.env.VIDEO_UPLOAD_FALLBACK_WAIT_MS || 90_000),
   modeOverrides: {
-    [CAMPAIGN_MODES.BLOG_MIXED]: Number(process.env.MODE_01_WAIT_MS || process.env.BLOG_MIXED_WAIT_MS || 7000),
-    [CAMPAIGN_MODES.IMAGE_ONLY]: Number(process.env.MODE_02_WAIT_MS || process.env.IMAGE_ONLY_WAIT_MS || 7000),
-    [CAMPAIGN_MODES.VIDEO_ONLY_CBO]: Number(process.env.MODE_03_WAIT_MS || process.env.VIDEO_ONLY_CBO_WAIT_MS || 9000),
-    [CAMPAIGN_MODES.IMAGE_ONLY_CBO]: Number(process.env.MODE_04_WAIT_MS || process.env.IMAGE_ONLY_CBO_WAIT_MS || 8000),
+    [CAMPAIGN_MODES.BLOG_MIXED]: Number(process.env.MODE_01_WAIT_MS || process.env.BLOG_MIXED_WAIT_MS || 10_000),
+    [CAMPAIGN_MODES.IMAGE_ONLY]: Number(process.env.MODE_02_WAIT_MS || process.env.IMAGE_ONLY_WAIT_MS || 5_000),
+    [CAMPAIGN_MODES.VIDEO_ONLY_CBO]: Number(process.env.MODE_03_WAIT_MS || process.env.VIDEO_ONLY_CBO_WAIT_MS || 12_000),
+    [CAMPAIGN_MODES.IMAGE_ONLY_CBO]: Number(process.env.MODE_04_WAIT_MS || process.env.IMAGE_ONLY_CBO_WAIT_MS || 6_000),
   },
 };
 const VIDEO_UPLOAD_TIMEOUT_MS = WAIT_CONFIG.videoUploadTimeoutMs;
@@ -217,6 +217,31 @@ function getResumeAdCreativeStartIndex(plan = activeCampaignPlan) {
   if (plannedIndex >= 0) return plannedIndex + 1;
   const trailingIndex = RESUME_FROM_AD_NAME.match(/_(\d+)$/)?.[1];
   return trailingIndex ? Number(trailingIndex) : 1;
+}
+
+function getModeWaitMs() {
+  return WAIT_CONFIG.modeOverrides[CAMPAIGN_MODE] || WAIT_CONFIG.baseRetryIntervalMs;
+}
+
+function getCreativeStabilizeWaitMs(adFormat = AD_FORMAT) {
+  const modeWait = getModeWaitMs();
+  return adFormat === 'video'
+    ? Math.max(modeWait, 10_000)
+    : Math.min(Math.max(modeWait, 2_000), 5_000);
+}
+
+function getMediaPreUploadWaitMs(adFormat = AD_FORMAT) {
+  const modeWait = getModeWaitMs();
+  return adFormat === 'video'
+    ? Math.max(modeWait, 12_000)
+    : Math.min(Math.max(modeWait, 2_000), 4_000);
+}
+
+function getMediaPostUploadWaitMs(adFormat = AD_FORMAT) {
+  const modeWait = getModeWaitMs();
+  return adFormat === 'video'
+    ? Math.max(modeWait, 12_000)
+    : Math.min(Math.max(modeWait, 3_000), 5_000);
 }
 
 function buildNotificationDetail(extra = {}) {
@@ -4215,11 +4240,11 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         console.log('[STEP] landing URL step completed and stabilized:', { targetAdName });
 
         await timedStep('open_creative_settings', targetAdName, () => enterCreativeInsideEditor(page, targetAdFormat));
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(getCreativeStabilizeWaitMs(targetAdFormat));
         console.log('[STEP] creative format step completed:', { targetAdName, targetAdFormat });
 
         if (isBlogMixedCampaign() || isVideoOnlyCampaign() || isCboCampaign()) {
-          await page.waitForTimeout(5000);
+          await page.waitForTimeout(getMediaPreUploadWaitMs(targetAdFormat));
           await timedStep(targetAdFormat === 'video' ? 'upload_video' : 'upload_image', targetAdName, () => attachMediaFromFolderIfConfigured(page, targetAdName, [targetAssetPath], targetAdFormat));
           console.log('[STEP] planned media upload completed:', {
             campaignMode: CAMPAIGN_MODE,
@@ -4232,24 +4257,24 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           if (!imageAssetPath) {
             throw new Error(`IMAGE_ONLY per-ad image asset not found for ad sequence ${adCreativeIndex}.`);
           }
-          await page.waitForTimeout(3000);
+          await page.waitForTimeout(getMediaPreUploadWaitMs('image'));
           await timedStep('upload_image', targetAdName, () => attachMediaFromFolderIfConfigured(page, targetAdName, [imageAssetPath], 'image'));
           console.log('[STEP] IMAGE_ONLY PER_AD media upload completed:', {
             targetAdName,
             targetAssetPath: imageAssetPath,
           });
         } else if (adCreativeIndex === 1 && !firstCreativeMediaUploaded) {
-          await page.waitForTimeout(5000);
+          await page.waitForTimeout(getMediaPreUploadWaitMs(AD_FORMAT));
           await timedStep('upload_media', targetAdName, () => attachMediaFromFolderIfConfigured(page, targetAdName));
           firstCreativeMediaUploaded = true;
           console.log('[STEP] first ad media upload completed');
         } else {
-          await page.waitForTimeout(3000);
+          await page.waitForTimeout(getMediaPreUploadWaitMs(AD_FORMAT));
           await timedStep('select_existing_media', targetAdName, () => searchAndSelectExistingMedia(page, targetAdName));
           console.log('[STEP] existing uploaded media selected:', { targetAdName });
         }
 
-        await page.waitForTimeout(7000);
+        await page.waitForTimeout(getMediaPostUploadWaitMs(targetAdFormat));
         console.log('[STEP] ad media handling completed - waiting before next ad search:', { targetAdName });
 
         processedAdRows.add(rowKey);
