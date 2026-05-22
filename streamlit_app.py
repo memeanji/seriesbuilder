@@ -11,9 +11,16 @@ import streamlit as st
 
 APP_DIR = Path(__file__).resolve().parent
 ENV_PATH = APP_DIR / ".env"
+RUN_ENV_DIR = APP_DIR / ".run-env"
 ADS_MANAGER_URL = "https://adsmanager.facebook.com/adsmanager/manage/campaigns"
 DEFAULT_ACCOUNT_ID = "1838892106940197"
 DEFAULT_CHROME_PROFILE_DIR = r"C:\meta_profiles\profile_01"
+PROFILE_ROOT = r"C:\meta_profiles"
+CHROME_PROFILE_SLOTS = {
+    "profile_01": {"dir": rf"{PROFILE_ROOT}\profile_01", "cdp_url": "http://127.0.0.1:9222"},
+    "profile_02": {"dir": rf"{PROFILE_ROOT}\profile_02", "cdp_url": "http://127.0.0.1:9223"},
+    "profile_03": {"dir": rf"{PROFILE_ROOT}\profile_03", "cdp_url": "http://127.0.0.1:9224"},
+}
 IS_WINDOWS = os.name == "nt"
 IS_STREAMLIT_CLOUD = bool(os.environ.get("STREAMLIT_RUNTIME") or os.environ.get("STREAMLIT_SHARING_MODE"))
 NOTIFICATION_DEFAULTS = {
@@ -203,6 +210,47 @@ def start_powershell(command: str) -> None:
         cwd=APP_DIR,
         creationflags=subprocess.CREATE_NEW_CONSOLE,
     )
+
+
+def powershell_quote(value: str | Path) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def infer_profile_slot(profile_dir: str) -> str:
+    folder_name = Path(profile_dir or DEFAULT_CHROME_PROFILE_DIR).name.lower()
+    if folder_name in CHROME_PROFILE_SLOTS:
+        return folder_name
+    return "custom"
+
+
+def cdp_port(cdp_url: str) -> str:
+    match = re.search(r":(\d+)(?:/|$)", cdp_url or "")
+    return match.group(1) if match else "9222"
+
+
+def build_chrome_cdp_command(chrome_path: str, profile_dir: str, cdp_url: str, url: str) -> str:
+    port = cdp_port(cdp_url)
+    args = [
+        f"--remote-debugging-port={port}",
+        f"--user-data-dir={profile_dir}",
+        "--new-window",
+        "--no-first-run",
+        url,
+    ]
+    arg_list = ", ".join(powershell_quote(arg) for arg in args)
+    return f"Start-Process -FilePath {powershell_quote(chrome_path)} -ArgumentList @({arg_list})"
+
+
+def build_automation_command(env_path: Path) -> str:
+    return f"$env:DOTENV_CONFIG_PATH = {powershell_quote(env_path)}; npm run open-campaign"
+
+
+def write_run_env_snapshot(values: dict[str, str], profile_slot: str) -> tuple[Path, str]:
+    RUN_ENV_DIR.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe_profile = re.sub(r"[^A-Za-z0-9_-]+", "_", profile_slot or "profile")
+    snapshot_path = RUN_ENV_DIR / f"run-{timestamp}-{safe_profile}.env"
+    return snapshot_path, write_env(values, snapshot_path)
 
 
 def default_blog_root() -> str:
@@ -496,27 +544,52 @@ with st.sidebar:
         subprocess.Popen(["code.cmd", str(ENV_PATH)], cwd=APP_DIR, shell=False)
         st.info(".env open requested.")
 
-    chrome_profile_dir = st.text_input(
-        "Chrome profile directory",
-        value=env.get("CHROME_PROFILE_DIR", DEFAULT_CHROME_PROFILE_DIR),
-        help="Meta 로그인 세션을 저장할 Chrome 프로필 폴더입니다. 직원별로 profile_01, profile_02처럼 다르게 지정하면 됩니다.",
+    default_profile_slot = infer_profile_slot(env.get("CHROME_PROFILE_DIR", DEFAULT_CHROME_PROFILE_DIR))
+    profile_options = ["profile_01", "profile_02", "profile_03", "custom"]
+    profile_slot = st.selectbox(
+        "Chrome profile slot",
+        profile_options,
+        index=profile_options.index(default_profile_slot),
+        help="프로필마다 별도 Chrome 프로세스와 CDP 포트를 사용합니다. profile_01=9222, profile_02=9223, profile_03=9224.",
+    )
+    if profile_slot == "custom":
+        chrome_profile_dir = st.text_input(
+            "Chrome profile directory",
+            value=env.get("CHROME_PROFILE_DIR", DEFAULT_CHROME_PROFILE_DIR),
+            help="Meta 로그인 세션을 저장할 Chrome 프로필 폴더입니다.",
+        )
+        cdp_url_default = env.get("CDP_URL", "http://127.0.0.1:9222")
+    else:
+        chrome_profile_dir = CHROME_PROFILE_SLOTS[profile_slot]["dir"]
+        st.text_input(
+            "Chrome profile directory",
+            value=chrome_profile_dir,
+            disabled=True,
+            help="선택한 profile slot에 맞춰 자동 지정됩니다.",
+        )
+        cdp_url_default = CHROME_PROFILE_SLOTS[profile_slot]["cdp_url"]
+
+    cdp_url = st.text_input(
+        "CDP URL",
+        value=cdp_url_default,
+        help="선택한 Chrome profile slot과 같은 포트여야 합니다. profile_02는 9223, profile_03은 9224를 권장합니다.",
     )
 
     if st.button("Open Chrome CDP", disabled=not IS_WINDOWS):
         account_id = env.get("AD_ACCOUNT_ID", DEFAULT_ACCOUNT_ID)
         url = f"{ADS_MANAGER_URL}?act={account_id}"
         chrome = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-        command = f'& "{chrome}" --remote-debugging-port=9222 --user-data-dir="{chrome_profile_dir}" "{url}"'
+        command = build_chrome_cdp_command(chrome, chrome_profile_dir, cdp_url, url)
         try:
             start_powershell(command)
-            st.info(f"Chrome CDP PowerShell opened with profile: {chrome_profile_dir}")
+            st.info(f"Chrome CDP opened: {profile_slot} / {cdp_url} / {chrome_profile_dir}")
         except Exception as exc:
             st.error(f"Chrome CDP launcher is unavailable here: {exc}")
 
     if st.button("Open automation terminal", disabled=not IS_WINDOWS):
         try:
             start_powershell("npm run open-campaign")
-            st.info("Automation PowerShell opened.")
+            st.info("Automation PowerShell opened with current .env. For isolated runs, use Run real automation terminal below.")
         except Exception as exc:
             st.error(f"Automation terminal launcher is unavailable here: {exc}")
 
@@ -593,7 +666,7 @@ with right:
         )
     daily_budget = st.text_input("Daily budget", value=env.get("ADSET_DAILY_BUDGET", "300000"))
     schedule_time = st.text_input("Schedule time", value=env.get("SCHEDULE_TIME", "05:00"))
-    cdp_url = st.text_input("CDP URL", value=env.get("CDP_URL", "http://127.0.0.1:9222"))
+    st.caption(f"Chrome CDP: `{profile_slot}` / `{cdp_url}`")
 
 next_env: dict[str, str] = {
     "AD_ACCOUNT_ID": ad_account_id,
@@ -904,8 +977,12 @@ with col3:
                 st.write(f"- {error}")
         else:
             try:
-                start_powershell("npm run open-campaign")
+                run_env_path, run_env_content = write_run_env_snapshot(real_env, profile_slot)
+                start_powershell(build_automation_command(run_env_path))
                 st.warning("DRY_RUN=false saved. Automation terminal opened.")
+                st.caption(f"Run env snapshot: {run_env_path}")
+                with st.expander("Run env snapshot", expanded=False):
+                    st.code(run_env_content, language="dotenv")
                 st.toast("자동화 터미널을 열었습니다. 완료/에러 알림은 실제 실행 결과에 따라 표시됩니다")
             except Exception as exc:
                 st.error(f"Automation terminal launcher is unavailable here: {exc}")

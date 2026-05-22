@@ -198,6 +198,18 @@ C:\meta_profiles\profile_02
 C:\meta_profiles\profile_03
 ```
 
+Streamlit의 `Chrome profile slot`은 프로필별로 CDP 포트를 분리합니다.
+
+```text
+profile_01 -> C:\meta_profiles\profile_01 -> http://127.0.0.1:9222
+profile_02 -> C:\meta_profiles\profile_02 -> http://127.0.0.1:9223
+profile_03 -> C:\meta_profiles\profile_03 -> http://127.0.0.1:9224
+```
+
+`Open Chrome CDP`는 선택한 프로필 폴더와 포트로 별도 Chrome 프로세스를 엽니다. 기존 일반 Chrome 창이나 다른 프로필의 자동화와 섞이지 않도록, 동시에 돌릴 때는 서로 다른 profile slot을 사용하세요.
+
+`Run real automation terminal`은 실행 시점의 설정을 `.run-env/run-...env` 스냅샷으로 저장하고, 해당 파일을 `DOTENV_CONFIG_PATH`로 지정해서 실행합니다. 그래서 실행 중인 터미널은 이후 Streamlit에서 `.env`를 다시 저장해도 방금 시작한 설정을 계속 사용합니다.
+
 실패한 광고부터 다시 실행하려면 Streamlit의 `실패 지점부터 재실행` 영역에서 `Resume from ad index` 또는 `Resume from ad name`을 지정합니다. 예를 들어 `f_i_o_l_0522_2`에서 멈췄다면 `Resume from ad index=2`로 저장한 뒤 다시 실행합니다. `1`이면 처음부터 진행합니다.
 
 ## IMAGE_ONLY 모드
