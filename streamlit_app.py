@@ -61,6 +61,8 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
         f"ADSET_DAILY_BUDGET={values.get('ADSET_DAILY_BUDGET', '100000')}",
         f"CDP_URL={values.get('CDP_URL', 'http://127.0.0.1:9222')}",
         f"CHROME_PROFILE_DIR={values.get('CHROME_PROFILE_DIR', DEFAULT_CHROME_PROFILE_DIR)}",
+        f"RESUME_FROM_AD_INDEX={values.get('RESUME_FROM_AD_INDEX', '1')}",
+        f"RESUME_FROM_AD_NAME={values.get('RESUME_FROM_AD_NAME', '')}",
         f"SCHEDULE_TIME={values.get('SCHEDULE_TIME', '05:00')}",
         f"LANDING_PATH_NUMBER={values.get('LANDING_PATH_NUMBER', '100')}",
         "",
@@ -460,6 +462,22 @@ with st.expander("공통 wait/retry 설정", expanded=False):
     mode_03_wait_ms = st.number_input("mode_03_wait VIDEO_ONLY_CBO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_03_WAIT_MS", "9000") or "9000"), step=1000)
     mode_04_wait_ms = st.number_input("mode_04_wait IMAGE_ONLY_CBO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_04_WAIT_MS", "8000") or "8000"), step=1000)
 
+with st.expander("실패 지점부터 재실행", expanded=False):
+    st.caption("광고명 변경/소재 업로드 중 중단된 경우, 실패한 광고 번호 또는 광고명을 넣고 다시 실행하면 해당 광고부터 이어서 처리합니다.")
+    resume_from_ad_index = st.number_input(
+        "Resume from ad index",
+        min_value=1,
+        max_value=1000,
+        value=int(env.get("RESUME_FROM_AD_INDEX", "1") or "1"),
+        help="예: f_i_o_l_0522_2에서 실패했다면 2를 입력합니다. 1이면 처음부터 진행합니다.",
+    )
+    resume_from_ad_name = st.text_input(
+        "Resume from ad name",
+        value=env.get("RESUME_FROM_AD_NAME", ""),
+        help="광고명이 명확하면 입력하세요. 예: f_i_o_l_0522_2. 인덱스보다 광고명 매칭을 우선 보조로 사용합니다.",
+    )
+    st.info("재실행 전에는 Meta 화면에서 실패한 캠페인 편집 화면이 열려 있거나, 기존 자동화가 해당 캠페인을 다시 열 수 있는 상태여야 합니다.")
+
 with st.sidebar:
     st.subheader("Actions")
     if not IS_WINDOWS:
@@ -587,6 +605,8 @@ next_env: dict[str, str] = {
     "ADSET_DAILY_BUDGET": daily_budget,
     "CDP_URL": cdp_url,
     "CHROME_PROFILE_DIR": chrome_profile_dir,
+    "RESUME_FROM_AD_INDEX": str(resume_from_ad_index),
+    "RESUME_FROM_AD_NAME": resume_from_ad_name,
     "SCHEDULE_TIME": schedule_time,
     "LANDING_PATH_NUMBER": env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")),
     "ENABLE_DESKTOP_ALERT": str(enable_desktop_alert).lower(),

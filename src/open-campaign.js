@@ -49,6 +49,8 @@ const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 const QUICK_TEST_CREATIVE_STEP = String(process.env.QUICK_TEST_CREATIVE_STEP || '').toLowerCase() === 'true';
 const ENABLE_SCREENSHOTS = parseBoolean(process.env.ENABLE_SCREENSHOTS);
 const QUICK_TEST_AD_NAME = process.env.QUICK_TEST_AD_NAME || getAdName(1);
+const RESUME_FROM_AD_NAME = String(process.env.RESUME_FROM_AD_NAME || '').trim();
+const RESUME_FROM_AD_INDEX = Number(process.env.RESUME_FROM_AD_INDEX || 1);
 const WAIT_CONFIG = {
   baseRetryCount: Number(process.env.WAIT_BASE_RETRY_COUNT || 5),
   baseRetryIntervalMs: Number(process.env.WAIT_BASE_RETRY_INTERVAL_MS || 1500),
@@ -118,6 +120,19 @@ function getPlanAdCount() {
   const adsets = getPlanAdsetCount();
   const adsPerAdset = activeCampaignPlan?.totalAdsPerAdset || AD_CREATIVE_COUNT + 1;
   return adsets * adsPerAdset;
+}
+
+function getResumeAdCreativeStartIndex(plan = activeCampaignPlan) {
+  if (Number.isFinite(RESUME_FROM_AD_INDEX) && RESUME_FROM_AD_INDEX > 1) {
+    return Math.floor(RESUME_FROM_AD_INDEX);
+  }
+  if (!RESUME_FROM_AD_NAME) return 1;
+  const normalizedTarget = normalizeText(RESUME_FROM_AD_NAME);
+  const plannedAds = (plan?.adsets || []).flatMap((adset) => adset.ads || []);
+  const plannedIndex = plannedAds.findIndex((ad) => normalizeText(ad.name || '') === normalizedTarget);
+  if (plannedIndex >= 0) return plannedIndex + 1;
+  const trailingIndex = RESUME_FROM_AD_NAME.match(/_(\d+)$/)?.[1];
+  return trailingIndex ? Number(trailingIndex) : 1;
 }
 
 function buildNotificationDetail(extra = {}) {
@@ -197,6 +212,7 @@ async function writeRunSummaryLog(status, error = null) {
     } : null,
   };
   await fs.writeFile(logPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8');
+  await fs.writeFile(path.resolve('logs', 'latest-run-summary.json'), `${JSON.stringify(payload, null, 2)}\n`, 'utf-8');
   console.log('[LOG] run summary saved:', logPath);
   return logPath;
 }
@@ -3337,7 +3353,7 @@ async function completeVideoMediaPickerFlow(page) {
     throw new Error('Could not find the Done button after video generation step.');
   }
 
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(4000);
   console.log('[STEP] video upload skip/original/done flow completed');
 }
 
@@ -3374,7 +3390,7 @@ async function completeMediaPickerNextAndOriginalFlow(page, adFormat = 'image') 
     throw new Error('Could not find the Done button after image generation step.');
   }
 
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(4000);
   console.log('[STEP] image select/original/text/done flow completed');
 }
 
@@ -3579,11 +3595,63 @@ async function enterCreativeInsideEditor(page, adFormat = AD_FORMAT) {
   throw new Error('크리에이티브 설정 버튼 클릭 후 광고 형식 버튼을 찾지 못했습니다.');
 }
 
+async function fillAdNameAndVerify(page, adNameInput, targetAdName) {
+  let actualAdName = '';
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    await adNameInput.scrollIntoViewIfNeeded().catch(() => null);
+    await adNameInput.click({ force: true });
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.press('Backspace');
+    if (attempt === 1) {
+      await page.keyboard.type(targetAdName, { delay: 70 });
+    } else {
+      await adNameInput.fill(targetAdName).catch(async () => {
+        await page.keyboard.type(targetAdName, { delay: 70 });
+      });
+    }
+    await page.waitForTimeout(attempt <= 2 ? 6000 : WAIT_CONFIG.extendedRetryIntervalMs);
+    actualAdName = await adNameInput.inputValue().catch(() => '');
+    console.log('[DEBUG] ad name input check:', { attempt, targetAdName, actualAdName });
+    if (actualAdName.includes(targetAdName)) {
+      console.log('[STEP] ad name changed:', { targetAdName, actualAdName, attempt });
+      return actualAdName;
+    }
+
+    console.log('[WARN] ad name input verification retry:', {
+      attempt,
+      targetAdName,
+      actualAdName,
+      nextWaitMs: attempt <= 2 ? 6000 : WAIT_CONFIG.extendedRetryIntervalMs,
+    });
+    await adNameInput.evaluate((el, value) => {
+      el.focus();
+      el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, targetAdName).catch(() => null);
+    await page.waitForTimeout(3000);
+    actualAdName = await adNameInput.inputValue().catch(() => '');
+    if (actualAdName.includes(targetAdName)) {
+      console.log('[STEP] ad name changed by DOM fallback:', { targetAdName, actualAdName, attempt });
+      return actualAdName;
+    }
+  }
+
+  throw new Error(`Ad name input verification failed: expected=${targetAdName}, actual=${actualAdName}`);
+}
+
 async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCount = 10, adCreativeCount = 5) {
   console.log('[STEP] sequential adset/ad rename started');
 
   let adsetIndex = adsetStartIndex;
-  let adCreativeIndex = 1;
+  let adCreativeIndex = getResumeAdCreativeStartIndex();
+  if (adCreativeIndex > 1) {
+    console.log('[STEP] resume mode enabled - starting ad rename from creative index:', {
+      adCreativeIndex,
+      RESUME_FROM_AD_INDEX,
+      RESUME_FROM_AD_NAME,
+    });
+  }
   const effectiveAdsetCount = adsetCount + 1;
   const effectiveCreativeCount = adCreativeCount + 1;
   const adsetEndIndex = adsetStartIndex + effectiveAdsetCount - 1;
@@ -3685,7 +3753,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         continue;
       }
 
-      if (isAlreadyTargetAdset && !isBlogAdsetCopyRow && isBlogMixedCampaign() && adsetIndex <= adsetEndIndex) {
+      if (isAlreadyTargetAdset && !isBlogAdsetCopyRow && adsetIndex <= adsetEndIndex) {
         processedAdsetRows.add(rowKey);
         console.log('[STEP] adset name already changed - moving to next adset:', { targetAdsetName, rowKey });
         adsetIndex += 1;
@@ -3808,17 +3876,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           current_video_file: targetAdFormat === 'video' ? targetAssetPath : '',
         });
 
-        await adNameInput.click({ force: true });
-        await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-        await page.keyboard.press('Backspace');
-        await page.keyboard.type(targetAdName, { delay: 60 });
-        await page.waitForTimeout(5000);
-        console.log('[STEP] ad name changed:', { targetAdName });
-        const actualAdName = await adNameInput.inputValue().catch(() => '');
-        console.log('[DEBUG] ad name input check:', { targetAdName, actualAdName });
-        if (!actualAdName.includes(targetAdName)) {
-          throw new Error(`Ad name input verification failed: expected=${targetAdName}, actual=${actualAdName}`);
-        }
+        await fillAdNameAndVerify(page, adNameInput, targetAdName);
 
         console.log('[STEP] ad creative plan:', {
           campaignMode: CAMPAIGN_MODE,

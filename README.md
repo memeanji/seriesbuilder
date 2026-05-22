@@ -161,6 +161,8 @@ ADSET_DAILY_BUDGET=100000
 
 CDP_URL=http://127.0.0.1:9222
 CHROME_PROFILE_DIR=C:\meta_profiles\profile_01
+RESUME_FROM_AD_INDEX=1
+RESUME_FROM_AD_NAME=
 SCHEDULE_TIME=05:00
 MEDIA_FOLDER_PATH=
 IMAGE_ONLY_UPLOAD_MODE=PER_AD
@@ -176,6 +178,8 @@ C:\meta_profiles\profile_01
 C:\meta_profiles\profile_02
 C:\meta_profiles\profile_03
 ```
+
+실패한 광고부터 다시 실행하려면 Streamlit의 `실패 지점부터 재실행` 영역에서 `Resume from ad index` 또는 `Resume from ad name`을 지정합니다. 예를 들어 `f_i_o_l_0522_2`에서 멈췄다면 `Resume from ad index=2`로 저장한 뒤 다시 실행합니다. `1`이면 처음부터 진행합니다.
 
 ## IMAGE_ONLY 모드
 
