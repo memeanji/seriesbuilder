@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import os
+import json
 import re
 import subprocess
 from datetime import datetime
@@ -13,6 +14,8 @@ APP_DIR = Path(__file__).resolve().parent
 ENV_PATH = APP_DIR / ".env"
 ADS_MANAGER_URL = "https://adsmanager.facebook.com/adsmanager/manage/campaigns"
 DEFAULT_ACCOUNT_ID = "1838892106940197"
+DEFAULT_JOB_ROOT = Path(r"C:\meta_jobs")
+DEFAULT_PROFILE_ROOT = Path(r"C:\meta_profiles")
 IS_WINDOWS = os.name == "nt"
 IS_STREAMLIT_CLOUD = bool(os.environ.get("STREAMLIT_RUNTIME") or os.environ.get("STREAMLIT_SHARING_MODE"))
 NOTIFICATION_DEFAULTS = {
@@ -71,6 +74,17 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
         f"NOTIFICATION_SUCCESS_TITLE={values.get('NOTIFICATION_SUCCESS_TITLE', NOTIFICATION_DEFAULTS['NOTIFICATION_SUCCESS_TITLE'])}",
         f"NOTIFICATION_ERROR_TITLE={values.get('NOTIFICATION_ERROR_TITLE', NOTIFICATION_DEFAULTS['NOTIFICATION_ERROR_TITLE'])}",
         f"NOTIFICATION_TIMEOUT_TITLE={values.get('NOTIFICATION_TIMEOUT_TITLE', NOTIFICATION_DEFAULTS['NOTIFICATION_TIMEOUT_TITLE'])}",
+        "",
+        f"WAIT_BASE_RETRY_COUNT={values.get('WAIT_BASE_RETRY_COUNT', '5')}",
+        f"WAIT_BASE_RETRY_INTERVAL_MS={values.get('WAIT_BASE_RETRY_INTERVAL_MS', '1500')}",
+        f"WAIT_EXTENDED_RETRY_COUNT={values.get('WAIT_EXTENDED_RETRY_COUNT', '5')}",
+        f"WAIT_EXTENDED_RETRY_INTERVAL_MS={values.get('WAIT_EXTENDED_RETRY_INTERVAL_MS', '7000')}",
+        f"VIDEO_UPLOAD_TIMEOUT_MS={values.get('VIDEO_UPLOAD_TIMEOUT_MS', '120000')}",
+        f"VIDEO_UPLOAD_FALLBACK_WAIT_MS={values.get('VIDEO_UPLOAD_FALLBACK_WAIT_MS', '60000')}",
+        f"MODE_01_WAIT_MS={values.get('MODE_01_WAIT_MS', '7000')}",
+        f"MODE_02_WAIT_MS={values.get('MODE_02_WAIT_MS', '7000')}",
+        f"MODE_03_WAIT_MS={values.get('MODE_03_WAIT_MS', '9000')}",
+        f"MODE_04_WAIT_MS={values.get('MODE_04_WAIT_MS', '8000')}",
         "",
     ]
 
@@ -188,6 +202,54 @@ def start_powershell(command: str) -> None:
         cwd=APP_DIR,
         creationflags=subprocess.CREATE_NEW_CONSOLE,
     )
+
+
+def list_job_dirs(job_root: Path) -> list[Path]:
+    if not job_root.exists():
+        return []
+    return sorted([path for path in job_root.iterdir() if path.is_dir() and (path / "mapping.xlsx").exists()])
+
+
+def read_mapping_xlsx(mapping_path: Path) -> list[dict[str, str]]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise RuntimeError("mapping.xlsx 미리보기를 위해 openpyxl이 필요합니다. `pip install -r requirements.txt`를 먼저 실행해주세요.") from exc
+
+    workbook = load_workbook(mapping_path, data_only=True)
+    sheet = workbook.active
+    rows = list(sheet.iter_rows(values_only=True))
+    if not rows:
+        return []
+
+    headers = [str(value or "").strip() for value in rows[0]]
+    records: list[dict[str, str]] = []
+    for row in rows[1:]:
+        record = {}
+        for index, header in enumerate(headers):
+            if not header:
+                continue
+            value = row[index] if index < len(row) else ""
+            record[header] = "" if value is None else str(value).strip()
+        if any(record.values()):
+            records.append(record)
+    return records
+
+
+def write_job_mapping_cache(job_dir: Path, records: list[dict[str, str]]) -> Path:
+    cache_path = job_dir / "mapping.cache.json"
+    cache_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+    return cache_path
+
+
+def read_job_state(job_dir: Path) -> dict:
+    state_path = job_dir / "job_state.json"
+    if not state_path.exists():
+        return {}
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"status": "invalid_state_file", "error": "job_state.json parse failed"}
 
 
 def default_blog_root() -> str:
@@ -435,6 +497,101 @@ with st.expander("회사 사람들과 같이 쓰는 방법"):
 
 env = read_env()
 
+with st.expander("Local job runner MVP: C:\\meta_jobs 기반 실행", expanded=False):
+    job_root = Path(st.text_input("Job root", value=env.get("LOCAL_JOB_ROOT", str(DEFAULT_JOB_ROOT))))
+    profile_root = Path(st.text_input("Profile root", value=env.get("LOCAL_PROFILE_ROOT", str(DEFAULT_PROFILE_ROOT))))
+    profile_id = st.selectbox("Browser profile", ["profile_01", "profile_02", "profile_03"], index=0)
+    account_id_for_job = st.text_input("Job runner ad account ID", value=env.get("AD_ACCOUNT_ID", DEFAULT_ACCOUNT_ID), key="job_runner_account_id")
+
+    job_dirs = list_job_dirs(job_root)
+    if not job_dirs:
+        st.info("job root 아래에 `mapping.xlsx`가 들어있는 job 폴더가 아직 없습니다. 예: C:\\meta_jobs\\job_01\\mapping.xlsx")
+    else:
+        selected_job_name = st.selectbox("Job folder", [path.name for path in job_dirs])
+        selected_job = next(path for path in job_dirs if path.name == selected_job_name)
+        mapping_path = selected_job / "mapping.xlsx"
+        state = read_job_state(selected_job)
+
+        try:
+            mapping_records = read_mapping_xlsx(mapping_path)
+            st.write(f"Mapping rows: `{len(mapping_records)}`")
+            st.dataframe(mapping_records, use_container_width=True, hide_index=True)
+        except Exception as exc:
+            mapping_records = []
+            st.error(str(exc))
+
+        state_cols = st.columns(4)
+        state_cols[0].metric("Status", state.get("status", "not_started"))
+        state_cols[1].metric("Last completed", state.get("last_completed_item", "-"))
+        state_cols[2].metric("Failed item", state.get("failed_item", "-"))
+        state_cols[3].metric("Failed step", state.get("failed_step", "-"))
+        if state.get("error"):
+            st.error(state["error"])
+
+        runner_env = {
+            "LOCAL_JOB_DIR": str(selected_job),
+            "LOCAL_JOB_ID": selected_job.name,
+            "LOCAL_PROFILE_ROOT": str(profile_root),
+            "LOCAL_PROFILE_ID": profile_id,
+            "AD_ACCOUNT_ID": account_id_for_job,
+            "ADS_MANAGER_URL": ADS_MANAGER_URL,
+            "SLOW_MO_MS": "120",
+            "JOB_RUNNER_DRY_RUN": "false",
+        }
+        if mapping_records:
+            write_job_mapping_cache(selected_job, mapping_records)
+
+        runner_command = (
+            "$env:LOCAL_JOB_DIR='{LOCAL_JOB_DIR}'; "
+            "$env:LOCAL_JOB_ID='{LOCAL_JOB_ID}'; "
+            "$env:LOCAL_PROFILE_ROOT='{LOCAL_PROFILE_ROOT}'; "
+            "$env:LOCAL_PROFILE_ID='{LOCAL_PROFILE_ID}'; "
+            "$env:AD_ACCOUNT_ID='{AD_ACCOUNT_ID}'; "
+            "$env:ADS_MANAGER_URL='{ADS_MANAGER_URL}'; "
+            "$env:SLOW_MO_MS='{SLOW_MO_MS}'; "
+            "$env:JOB_RUNNER_DRY_RUN='{JOB_RUNNER_DRY_RUN}'; "
+            "node src/job-runner.js"
+        ).format(**runner_env)
+
+        job_col1, job_col2, job_col3 = st.columns(3)
+        with job_col1:
+            if st.button("Run selected job", disabled=not IS_WINDOWS or not mapping_records):
+                try:
+                    start_powershell(runner_command)
+                    st.success("Local job runner terminal opened.")
+                except Exception as exc:
+                    st.error(f"Local job runner cannot start here: {exc}")
+        with job_col2:
+            if st.button("Restart from failed item", disabled=not IS_WINDOWS or not mapping_records):
+                try:
+                    start_powershell(runner_command)
+                    st.success("Restart terminal opened. job_state.json 기준으로 실패 소재부터 재개합니다.")
+                except Exception as exc:
+                    st.error(f"Local job runner cannot restart here: {exc}")
+        with job_col3:
+            st.caption("Stop 기능은 다음 단계에서 큐/프로세스 관리와 함께 붙입니다.")
+
+        log_path = selected_job / "logs" / "run.log"
+        error_log_path = selected_job / "logs" / "error.log"
+        if log_path.exists():
+            with st.expander("logs/run.log", expanded=False):
+                st.code(log_path.read_text(encoding="utf-8", errors="replace")[-8000:], language="text")
+        if error_log_path.exists():
+            with st.expander("logs/error.log", expanded=False):
+                st.code(error_log_path.read_text(encoding="utf-8", errors="replace")[-8000:], language="text")
+
+with st.expander("공통 wait/retry 설정", expanded=False):
+    wait_base_retry_count = st.number_input("기본 재시도 횟수", min_value=1, max_value=20, value=int(env.get("WAIT_BASE_RETRY_COUNT", "5") or "5"))
+    wait_base_retry_interval = st.number_input("기본 재시도 간격(ms)", min_value=500, max_value=10000, value=int(env.get("WAIT_BASE_RETRY_INTERVAL_MS", "1500") or "1500"), step=500)
+    wait_extended_retry_count = st.number_input("확장 재시도 횟수", min_value=1, max_value=20, value=int(env.get("WAIT_EXTENDED_RETRY_COUNT", "5") or "5"))
+    wait_extended_retry_interval = st.number_input("확장 재시도 간격(ms)", min_value=1000, max_value=30000, value=int(env.get("WAIT_EXTENDED_RETRY_INTERVAL_MS", "7000") or "7000"), step=1000)
+    video_upload_timeout_ms = st.number_input("영상 업로드 확인 timeout(ms)", min_value=30000, max_value=300000, value=int(env.get("VIDEO_UPLOAD_TIMEOUT_MS", "120000") or "120000"), step=10000)
+    video_upload_fallback_wait_ms = st.number_input("영상 fallback 대기(ms)", min_value=30000, max_value=90000, value=int(env.get("VIDEO_UPLOAD_FALLBACK_WAIT_MS", "60000") or "60000"), step=10000)
+    mode_01_wait_ms = st.number_input("mode_01_wait BLOG_MIXED(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_01_WAIT_MS", "7000") or "7000"), step=1000)
+    mode_02_wait_ms = st.number_input("mode_02_wait IMAGE_ONLY(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_02_WAIT_MS", "7000") or "7000"), step=1000)
+    mode_03_wait_ms = st.number_input("mode_03_wait VIDEO_ONLY_CBO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_03_WAIT_MS", "9000") or "9000"), step=1000)
+    mode_04_wait_ms = st.number_input("mode_04_wait IMAGE_ONLY_CBO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_04_WAIT_MS", "8000") or "8000"), step=1000)
+
 with st.sidebar:
     st.subheader("Actions")
     if not IS_WINDOWS:
@@ -566,6 +723,16 @@ next_env: dict[str, str] = {
     "NOTIFICATION_SUCCESS_TITLE": env.get("NOTIFICATION_SUCCESS_TITLE", NOTIFICATION_DEFAULTS["NOTIFICATION_SUCCESS_TITLE"]),
     "NOTIFICATION_ERROR_TITLE": env.get("NOTIFICATION_ERROR_TITLE", NOTIFICATION_DEFAULTS["NOTIFICATION_ERROR_TITLE"]),
     "NOTIFICATION_TIMEOUT_TITLE": env.get("NOTIFICATION_TIMEOUT_TITLE", NOTIFICATION_DEFAULTS["NOTIFICATION_TIMEOUT_TITLE"]),
+    "WAIT_BASE_RETRY_COUNT": str(wait_base_retry_count),
+    "WAIT_BASE_RETRY_INTERVAL_MS": str(wait_base_retry_interval),
+    "WAIT_EXTENDED_RETRY_COUNT": str(wait_extended_retry_count),
+    "WAIT_EXTENDED_RETRY_INTERVAL_MS": str(wait_extended_retry_interval),
+    "VIDEO_UPLOAD_TIMEOUT_MS": str(video_upload_timeout_ms),
+    "VIDEO_UPLOAD_FALLBACK_WAIT_MS": str(video_upload_fallback_wait_ms),
+    "MODE_01_WAIT_MS": str(mode_01_wait_ms),
+    "MODE_02_WAIT_MS": str(mode_02_wait_ms),
+    "MODE_03_WAIT_MS": str(mode_03_wait_ms),
+    "MODE_04_WAIT_MS": str(mode_04_wait_ms),
 }
 
 with st.expander("Notification preview", expanded=False):

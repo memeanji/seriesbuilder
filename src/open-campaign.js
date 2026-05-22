@@ -49,7 +49,21 @@ const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 const QUICK_TEST_CREATIVE_STEP = String(process.env.QUICK_TEST_CREATIVE_STEP || '').toLowerCase() === 'true';
 const ENABLE_SCREENSHOTS = parseBoolean(process.env.ENABLE_SCREENSHOTS);
 const QUICK_TEST_AD_NAME = process.env.QUICK_TEST_AD_NAME || getAdName(1);
-const VIDEO_UPLOAD_TIMEOUT_MS = 120_000;
+const WAIT_CONFIG = {
+  baseRetryCount: Number(process.env.WAIT_BASE_RETRY_COUNT || 5),
+  baseRetryIntervalMs: Number(process.env.WAIT_BASE_RETRY_INTERVAL_MS || 1500),
+  extendedRetryCount: Number(process.env.WAIT_EXTENDED_RETRY_COUNT || 5),
+  extendedRetryIntervalMs: Number(process.env.WAIT_EXTENDED_RETRY_INTERVAL_MS || 7000),
+  videoUploadTimeoutMs: Number(process.env.VIDEO_UPLOAD_TIMEOUT_MS || 120_000),
+  videoFallbackWaitMs: Number(process.env.VIDEO_UPLOAD_FALLBACK_WAIT_MS || 60_000),
+  modeOverrides: {
+    [CAMPAIGN_MODES.BLOG_MIXED]: Number(process.env.MODE_01_WAIT_MS || process.env.BLOG_MIXED_WAIT_MS || 7000),
+    [CAMPAIGN_MODES.IMAGE_ONLY]: Number(process.env.MODE_02_WAIT_MS || process.env.IMAGE_ONLY_WAIT_MS || 7000),
+    [CAMPAIGN_MODES.VIDEO_ONLY_CBO]: Number(process.env.MODE_03_WAIT_MS || process.env.VIDEO_ONLY_CBO_WAIT_MS || 9000),
+    [CAMPAIGN_MODES.IMAGE_ONLY_CBO]: Number(process.env.MODE_04_WAIT_MS || process.env.IMAGE_ONLY_CBO_WAIT_MS || 8000),
+  },
+};
+const VIDEO_UPLOAD_TIMEOUT_MS = WAIT_CONFIG.videoUploadTimeoutMs;
 
 let firstCreativeMediaUploaded = false;
 let activeCampaignPlan = null;
@@ -2357,7 +2371,11 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
 
 async function waitForVideoUploadComplete(page, targetAdName, timeoutMs = VIDEO_UPLOAD_TIMEOUT_MS) {
   const startedAt = Date.now();
-  console.log('[STEP] upload started:', { targetAdName, timeoutMs });
+  console.log('[STEP] video upload processing wait started:', {
+    targetAdName,
+    timeoutMs,
+    fallbackWaitMs: WAIT_CONFIG.videoFallbackWaitMs,
+  });
   let lastSnapshot = {};
 
   while (Date.now() - startedAt < timeoutMs) {
@@ -2398,6 +2416,37 @@ async function waitForVideoUploadComplete(page, targetAdName, timeoutMs = VIDEO_
   }
 
   const timeoutSeconds = Math.round(timeoutMs / 1000);
+  console.log('[WAIT] video upload completion ambiguous - applying fallback wait:', {
+    targetAdName,
+    fallbackWaitMs: WAIT_CONFIG.videoFallbackWaitMs,
+    lastSnapshot,
+  });
+  await page.waitForTimeout(WAIT_CONFIG.videoFallbackWaitMs);
+  lastSnapshot = await page.evaluate((name) => {
+    const bodyText = document.body?.innerText || '';
+    const hasError = /오류|실패|error|failed/i.test(bodyText);
+    const hasProgress100 = /100\s*%|완료|completed|done/i.test(bodyText);
+    const hasThumbnail = new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(bodyText) ||
+      Boolean(document.querySelector('video, img[src], [aria-label*="thumbnail" i], [data-testid*="thumbnail" i]'));
+    const nextEnabled = [...document.querySelectorAll('[role="button"], button')]
+      .some((el) => {
+        const text = (el.innerText || el.textContent || '').trim();
+        const disabled = el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('disabled') || el.getAttribute('aria-busy') === 'true';
+        return /^(다음|완료|저장|Next|Done|Save)$/.test(text) && !disabled;
+      });
+    const uploading = /업로드 중|처리 중|uploading|processing/i.test(bodyText);
+    return { hasError, hasProgress100, hasThumbnail, nextEnabled, uploading, textSample: bodyText.slice(0, 500) };
+  }, targetAdName).catch((error) => ({ hasError: false, hasProgress100: false, hasThumbnail: false, nextEnabled: false, uploading: true, error: error.message }));
+
+  if (lastSnapshot.hasProgress100 || (lastSnapshot.hasThumbnail && lastSnapshot.nextEnabled && !lastSnapshot.uploading)) {
+    console.log('[STEP] video upload processing completed after fallback:', {
+      targetAdName,
+      uploadWaitDurationMs: Date.now() - startedAt,
+      lastSnapshot,
+    });
+    return;
+  }
+
   await debugDump(page, `video upload ambiguous after ${timeoutSeconds}s ${targetAdName}`);
   await safeScreenshot(
     page,
@@ -3012,7 +3061,25 @@ async function clickMediaPickerButton(page, buttonText, attemptLabel, dataSurfac
   const exactPattern = new RegExp(`^\\s*(?:${escapedLabels.join('|')})\\s*$`, 'i');
   const containsPattern = new RegExp(`(?:${escapedLabels.join('|')})`, 'i');
 
-  for (let attempt = 1; attempt <= 8; attempt += 1) {
+  const totalAttempts = WAIT_CONFIG.baseRetryCount + WAIT_CONFIG.extendedRetryCount;
+  console.log('[STEP] media picker button search started:', {
+    buttonText,
+    attemptLabel,
+    labels,
+    baseRetryCount: WAIT_CONFIG.baseRetryCount,
+    extendedRetryCount: WAIT_CONFIG.extendedRetryCount,
+  });
+
+  for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
+    const extended = attempt > WAIT_CONFIG.baseRetryCount;
+    if (attempt === WAIT_CONFIG.baseRetryCount + 1) {
+      console.log('[WAIT] media picker button switching to extended wait:', {
+        buttonText,
+        attemptLabel,
+        attemptedLabels: labels,
+        extendedRetryIntervalMs: WAIT_CONFIG.extendedRetryIntervalMs,
+      });
+    }
     const candidates = [
       {
         name: `${buttonText} data-surface exact`,
@@ -3047,7 +3114,7 @@ async function clickMediaPickerButton(page, buttonText, attemptLabel, dataSurfac
     ];
 
     for (const candidate of candidates) {
-      const visible = await candidate.locator.isVisible({ timeout: 1500 }).catch(() => false);
+      const visible = await candidate.locator.isVisible({ timeout: extended ? WAIT_CONFIG.extendedRetryIntervalMs : WAIT_CONFIG.baseRetryIntervalMs }).catch(() => false);
       if (!visible) continue;
 
       const disabled = await candidate.locator.evaluate((el) => (
@@ -3155,9 +3222,17 @@ async function clickMediaPickerButton(page, buttonText, attemptLabel, dataSurfac
       return true;
     }
 
-    await page.waitForTimeout(1500);
+    console.log('[WAIT] media picker button retry:', {
+      buttonText,
+      attemptLabel,
+      attempt,
+      attemptedLabels: labels,
+      nextWaitMs: extended ? WAIT_CONFIG.extendedRetryIntervalMs : WAIT_CONFIG.baseRetryIntervalMs,
+    });
+    await page.waitForTimeout(extended ? WAIT_CONFIG.extendedRetryIntervalMs : WAIT_CONFIG.baseRetryIntervalMs);
   }
 
+  await debugDump(page, `media picker button not found ${buttonText} ${attemptLabel}`);
   return false;
 }
 

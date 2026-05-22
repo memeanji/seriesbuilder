@@ -6,6 +6,7 @@
   "scripts": {
     "login": "node src/login.js",
     "open-campaign": "node src/open-campaign.js",
+    "run-job": "node src/job-runner.js",
     "test": "node --test"
   },
   "dependencies": {
