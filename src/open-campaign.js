@@ -56,8 +56,8 @@ const WAIT_CONFIG = {
   baseRetryIntervalMs: Number(process.env.WAIT_BASE_RETRY_INTERVAL_MS || 1500),
   extendedRetryCount: Number(process.env.WAIT_EXTENDED_RETRY_COUNT || 5),
   extendedRetryIntervalMs: Number(process.env.WAIT_EXTENDED_RETRY_INTERVAL_MS || 7000),
-  videoUploadTimeoutMs: Number(process.env.VIDEO_UPLOAD_TIMEOUT_MS || 120_000),
-  videoFallbackWaitMs: Number(process.env.VIDEO_UPLOAD_FALLBACK_WAIT_MS || 60_000),
+  videoUploadTimeoutMs: Number(process.env.VIDEO_UPLOAD_TIMEOUT_MS || 180_000),
+  videoFallbackWaitMs: Number(process.env.VIDEO_UPLOAD_FALLBACK_WAIT_MS || 90_000),
   modeOverrides: {
     [CAMPAIGN_MODES.BLOG_MIXED]: Number(process.env.MODE_01_WAIT_MS || process.env.BLOG_MIXED_WAIT_MS || 7000),
     [CAMPAIGN_MODES.IMAGE_ONLY]: Number(process.env.MODE_02_WAIT_MS || process.env.IMAGE_ONLY_WAIT_MS || 7000),
@@ -729,7 +729,7 @@ async function trySearchBox(page, keyword) {
   await searchInput.fill('');
   await searchInput.fill(keyword);
   await page.keyboard.press('Enter').catch(() => {});
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(1000);
   return true;
 }
 
@@ -933,7 +933,7 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   } else {
     await ensureAdsetCreateOpen(page);
   }
-  await pause(page, '광고 세트명 입력 전 대기', 2000);
+  await pause(page, '광고 세트명 입력 전 대기', 800);
 
   const broadLocator = page.locator(
     'input[placeholder="광고 세트 이름 지정"], input[placeholder="여기에 광고 세트 이름을 입력하세요..."], input._58al._aghb[type="text"], input[type="text"][value*="리타겟"], input[type="text"][value*="광고세트"], input[type="text"][value*="광고 세트"], input[data-auto-logging-id]'
@@ -954,7 +954,7 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
       targetInputHandle = await findVideoCboAdsetNameInputHandle(page, adsetName);
       if (targetInputHandle) break;
       console.log('[WAIT] CBO adset name input search retry...');
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(1500);
       continue;
     }
 
@@ -987,7 +987,7 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
 
     if (!targetInputHandle) {
       console.log('[WAIT] 광고 세트 이름 input 검색 중... (재시도)');
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(2000);
     }
   }
 
@@ -998,18 +998,17 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
   }
 
   await targetInputHandle.asElement().click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(150);
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
   await page.keyboard.press('Backspace');
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
   await page.keyboard.type(adsetName, { delay: 80 });
-  await page.waitForTimeout(1000);
-
-  let actualValue = await targetInputHandle.evaluate((el) => el.value || '');
+  let valueCheck = await waitForInputHandleValue(targetInputHandle, adsetName, 3000);
+  let actualValue = valueCheck.actual;
   console.log('[DEBUG] actual adset input value:', actualValue);
 
-  if (!actualValue.trim().includes(adsetName)) {
+  if (!valueCheck.ok) {
     console.log('[DEBUG] keyboard.type 미반영 - DOM value fallback 적용');
     await targetInputHandle.evaluate((el, value) => {
       el.focus();
@@ -1018,8 +1017,8 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }, adsetName);
 
-    await page.waitForTimeout(1000);
-    actualValue = await targetInputHandle.evaluate((el) => el.value || '');
+    valueCheck = await waitForInputHandleValue(targetInputHandle, adsetName, 3000);
+    actualValue = valueCheck.actual;
     console.log('[DEBUG] actual adset input value after fallback:', actualValue);
   }
 
@@ -1028,7 +1027,7 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
     throw new Error(`광고 세트명 입력 실패: expected=${adsetName}, actual=${actualValue}`);
   }
 
-  await pause(page, '광고 세트명 입력 후 대기', 5000);
+  await pause(page, '광고 세트명 입력 후 대기', 1500);
   if (!isCboCampaign()) {
     await clickContinueButtonOnly(page);
     await safeScreenshot(page, path.join(DIRS.screenshots, '08-adset-name-and-continue.png'), 'adset name and continue');
@@ -1166,6 +1165,20 @@ async function fillInputHandle(page, inputHandle, value, label) {
   return actualValue === value;
 }
 
+async function waitForInputHandleValue(inputHandle, expectedValue, timeoutMs = 3000) {
+  const startedAt = Date.now();
+  const expected = String(expectedValue || '');
+  let actual = '';
+  while (Date.now() - startedAt < timeoutMs) {
+    actual = await inputHandle.evaluate((el) => el.value || '').catch(() => '');
+    if (actual === expected || normalizeText(actual).includes(normalizeText(expected))) {
+      return { ok: true, actual };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+  return { ok: false, actual };
+}
+
 async function fillCurrencyInputHandle(page, inputHandle, formattedValue, label) {
   const rawDigits = String(formattedValue || '').replace(/[^\d]/g, '');
   const attempts = [rawDigits, formattedValue].filter(Boolean);
@@ -1173,7 +1186,7 @@ async function fillCurrencyInputHandle(page, inputHandle, formattedValue, label)
 
   for (const attemptValue of attempts) {
     await inputHandle.asElement().click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(2500);
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
     await page.keyboard.press('Backspace');
     await page.keyboard.type(attemptValue, { delay: 60 });
@@ -1283,7 +1296,7 @@ async function openCorrectAdActionMenu(page, adsetName) {
   console.log('[STEP] row 기준 작업 메뉴 검색');
 
   await ensureCampaignStructureRoot(page);
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(500);
 
   const fastMenuBox = adsetName === '새 판매 광고'
     ? { x: 371, y: 159, width: 44, height: 36, label: '광고 복제 작업메뉴 빠른 좌표' }
@@ -1309,7 +1322,7 @@ async function openCorrectAdActionMenu(page, adsetName) {
 
   console.log('[DEBUG] 빠른 작업메뉴 좌표 클릭 시도:', fastMenuBox);
   await page.mouse.click(fastMenuBox.x + fastMenuBox.width / 2, fastMenuBox.y + fastMenuBox.height / 2);
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(1000);
 
   if (await isActionMenuOpen(3000)) {
     console.log('[STEP] 작업 메뉴 빠른 좌표 열기 성공');
@@ -1336,7 +1349,7 @@ async function openCorrectAdActionMenu(page, adsetName) {
   if (!adRowVisible) {
     throw new Error(`광고세트 row를 찾지 못했습니다: ${adsetName}`);
   }
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(500);
 
   const adRowBox = await adRow.boundingBox();
   if (!adRowBox) throw new Error(`광고세트 row 위치를 찾지 못했습니다: ${adsetName}`);
@@ -1374,21 +1387,21 @@ async function openCorrectAdActionMenu(page, adsetName) {
 
     if (!targetMenu) {
       console.log('[WARN] 같은 row의 작업 메뉴 후보를 찾지 못함');
-      await page.waitForTimeout(2500);
+      await page.waitForTimeout(1000);
       continue;
     }
 
     const menuBox = await targetMenu.boundingBox();
     if (!menuBox) {
-      await page.waitForTimeout(2500);
+      await page.waitForTimeout(1000);
       continue;
     }
 
     const menuTypeLabel = adsetName === '새 판매 광고' ? '광고 복제 작업메뉴 찾기' : '광고 세트 작업메뉴 찾기';
     console.log(`[DEBUG] ${menuTypeLabel}:`, menuBox);
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(300);
     await page.mouse.click(menuBox.x + menuBox.width / 2, menuBox.y + menuBox.height / 2);
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(1000);
 
     if (await isActionMenuOpen(5000)) {
       opened = true;
@@ -1414,15 +1427,21 @@ async function clickDuplicateMenuItem(page) {
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     await duplicateButton.waitFor({ state: 'visible', timeout: 30000 });
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(500);
     await duplicateButton.click({ force: true }).catch(async () => {
       const box = await duplicateButton.boundingBox();
       if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
-    await page.waitForTimeout(5000);
 
-    const bodyText = await page.locator('body').innerText().catch(() => '');
-    const input = await findDuplicateCountInputHandle(page);
+    let bodyText = '';
+    let input = null;
+    const modalDeadline = Date.now() + 6000;
+    while (Date.now() < modalDeadline && !input) {
+      bodyText = await page.locator('body').innerText().catch(() => '');
+      input = await findDuplicateCountInputHandle(page);
+      if (input || /복제\s*개수|계속|복제 만들기|Create duplicates|Duplicate/i.test(bodyText)) break;
+      await page.waitForTimeout(400);
+    }
     const duplicateStillVisible = await duplicateButton.isVisible({ timeout: 1000 }).catch(() => false);
     if (input || !duplicateStillVisible || /복제\s*개수|계속|복제 만들기|Create duplicates|Duplicate/i.test(bodyText)) {
       console.log('[STEP] duplicate menu item clicked');
@@ -1516,17 +1535,16 @@ async function setDuplicateCount(page, count = 9, adsetName) {
     console.log('[STEP] 복제 개수 input 검색');
 
     for (let attempt = 1; attempt <= 8; attempt += 1) {
-      await pause(page, `복제 input 검색 대기 ${modalAttempt}.${attempt}/8`, 1500);
       duplicateInput = await findDuplicateCountInputHandle(page);
       if (duplicateInput) break;
       console.log(`[WAIT] 복제 개수 input 검색 재시도 ${modalAttempt}.${attempt}/8`);
-      await page.waitForTimeout(2500);
+      await page.waitForTimeout(attempt <= 3 ? 700 : 1500);
     }
 
     if (!duplicateInput && modalAttempt < 3) {
       console.log('[WARN] 복제 개수 input 미확정 - 모달 닫고 복제 메뉴 재오픈');
       await page.keyboard.press('Escape').catch(() => null);
-      await page.waitForTimeout(2500);
+      await page.waitForTimeout(1000);
     }
   }
 
@@ -1536,18 +1554,17 @@ async function setDuplicateCount(page, count = 9, adsetName) {
   }
 
   await duplicateInput.click();
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(200);
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(100);
   await page.keyboard.press('Backspace');
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(100);
   await page.keyboard.type(String(count), { delay: 80 });
-  await page.waitForTimeout(2000);
-
-  let actualValue = await duplicateInput.evaluate((el) => el.value);
+  let duplicateValueCheck = await waitForInputHandleValue(duplicateInput, String(count), 3000);
+  let actualValue = duplicateValueCheck.actual;
   console.log('[DEBUG] duplicate count after keyboard input:', actualValue);
 
-  if (actualValue !== String(count)) {
+  if (!duplicateValueCheck.ok) {
     console.log('[WARN] 키보드 입력으로 복제 개수 변경 실패 - DOM value 직접 변경 fallback');
 
     await duplicateInput.evaluate((el, value) => {
@@ -1557,8 +1574,8 @@ async function setDuplicateCount(page, count = 9, adsetName) {
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }, String(count));
 
-    await page.waitForTimeout(2000);
-    actualValue = await duplicateInput.evaluate((el) => el.value);
+    duplicateValueCheck = await waitForInputHandleValue(duplicateInput, String(count), 3000);
+    actualValue = duplicateValueCheck.actual;
   }
 
   console.log('[DEBUG] final duplicate count:', actualValue);
@@ -1682,16 +1699,16 @@ async function confirmDuplicateModal(page) {
     console.log('[DEBUG] 복제 만들기 버튼 상태:', { attempt, visible, box });
 
     if (visible && box) {
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(500);
       await duplicateCreateButton.click({ force: true }).catch(async () => {
         await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       });
-      await page.waitForTimeout(7000);
+      await duplicateCreateButton.waitFor({ state: 'hidden', timeout: 7000 }).catch(() => null);
       return true;
     }
 
     console.log(`[WAIT] 복제 만들기 버튼 검색 재시도 ${attempt}/10`);
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(1200);
   }
 
   const confirmCandidates = page.locator('div, span, button').filter({ hasText: /^복제$/ });
@@ -1710,16 +1727,16 @@ async function confirmDuplicateModal(page) {
       if (!visible || !box) continue;
       if (box.x < 900 || box.y < 480 || box.y > 700) continue;
 
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(500);
       await candidate.click({ force: true }).catch(async () => {
         await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       });
-      await page.waitForTimeout(7000);
+      await candidate.waitFor({ state: 'hidden', timeout: 7000 }).catch(() => null);
       return true;
     }
 
     console.log(`[WAIT] 복제 confirm fallback 검색 재시도 ${attempt}/10`);
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(1200);
   }
 
   await safeScreenshot(page, path.join(DIRS.screenshots, 'duplicate-confirm-not-found.png'), 'duplicate confirm not found');
@@ -1812,7 +1829,7 @@ async function clickCampaignContinueButton(page) {
       await page.waitForTimeout(5000);
       return true;
     }
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(1000);
   }
   await debugDump(page, 'campaign continue button not found');
   throw new Error('Campaign objective continue button not found or stayed disabled.');
@@ -1848,7 +1865,7 @@ async function selectSalesObjective(page) {
   }).catch(() => false);
   if (!clicked) await heading.click({ force: true });
 
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(500);
   const checked = await page.evaluate(() => {
     const salesHeading = [...document.querySelectorAll('[role="heading"], span, div')]
       .find((el) => (el.textContent || '').trim() === '판매');
@@ -2013,7 +2030,7 @@ async function fillCampaignBudget(page, budget) {
   const formattedBudget = formatBudgetForMetaInput(budget);
   console.log('[STEP] filling campaign budget:', { raw: budget, formattedBudget });
   await page.mouse.wheel(0, 500);
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(500);
   await selectCampaignDailyBudgetIfVisible(page);
 
   let input = await findCampaignBudgetInputHandle(page);
@@ -2061,7 +2078,7 @@ async function selectCampaignDailyBudgetIfVisible(page) {
     await candidate.click({ force: true }).catch(async () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(300);
     console.log('[STEP] campaign budget type selected: daily');
     return true;
   }
@@ -2438,7 +2455,7 @@ async function selectVideoAdModeWithRequestedClasses(page) {
       return;
     }
 
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(2500);
   }
 
   await debugDump(page, 'video ad button not clicked');

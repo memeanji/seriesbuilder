@@ -87,8 +87,8 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
         f"WAIT_BASE_RETRY_INTERVAL_MS={values.get('WAIT_BASE_RETRY_INTERVAL_MS', '1500')}",
         f"WAIT_EXTENDED_RETRY_COUNT={values.get('WAIT_EXTENDED_RETRY_COUNT', '5')}",
         f"WAIT_EXTENDED_RETRY_INTERVAL_MS={values.get('WAIT_EXTENDED_RETRY_INTERVAL_MS', '7000')}",
-        f"VIDEO_UPLOAD_TIMEOUT_MS={values.get('VIDEO_UPLOAD_TIMEOUT_MS', '120000')}",
-        f"VIDEO_UPLOAD_FALLBACK_WAIT_MS={values.get('VIDEO_UPLOAD_FALLBACK_WAIT_MS', '60000')}",
+        f"VIDEO_UPLOAD_TIMEOUT_MS={values.get('VIDEO_UPLOAD_TIMEOUT_MS', '180000')}",
+        f"VIDEO_UPLOAD_FALLBACK_WAIT_MS={values.get('VIDEO_UPLOAD_FALLBACK_WAIT_MS', '90000')}",
         f"MODE_01_WAIT_MS={values.get('MODE_01_WAIT_MS', '7000')}",
         f"MODE_02_WAIT_MS={values.get('MODE_02_WAIT_MS', '7000')}",
         f"MODE_03_WAIT_MS={values.get('MODE_03_WAIT_MS', '9000')}",
@@ -503,8 +503,8 @@ with st.expander("공통 wait/retry 설정", expanded=False):
     wait_base_retry_interval = st.number_input("기본 재시도 간격(ms)", min_value=500, max_value=10000, value=int(env.get("WAIT_BASE_RETRY_INTERVAL_MS", "1500") or "1500"), step=500)
     wait_extended_retry_count = st.number_input("확장 재시도 횟수", min_value=1, max_value=20, value=int(env.get("WAIT_EXTENDED_RETRY_COUNT", "5") or "5"))
     wait_extended_retry_interval = st.number_input("확장 재시도 간격(ms)", min_value=1000, max_value=30000, value=int(env.get("WAIT_EXTENDED_RETRY_INTERVAL_MS", "7000") or "7000"), step=1000)
-    video_upload_timeout_ms = st.number_input("영상 업로드 확인 timeout(ms)", min_value=30000, max_value=300000, value=int(env.get("VIDEO_UPLOAD_TIMEOUT_MS", "120000") or "120000"), step=10000)
-    video_upload_fallback_wait_ms = st.number_input("영상 fallback 대기(ms)", min_value=30000, max_value=90000, value=int(env.get("VIDEO_UPLOAD_FALLBACK_WAIT_MS", "60000") or "60000"), step=10000)
+    video_upload_timeout_ms = st.number_input("영상 업로드 확인 timeout(ms)", min_value=30000, max_value=300000, value=int(env.get("VIDEO_UPLOAD_TIMEOUT_MS", "180000") or "180000"), step=10000)
+    video_upload_fallback_wait_ms = st.number_input("영상 fallback 대기(ms)", min_value=30000, max_value=120000, value=int(env.get("VIDEO_UPLOAD_FALLBACK_WAIT_MS", "90000") or "90000"), step=10000)
     mode_01_wait_ms = st.number_input("mode_01_wait BLOG_MIXED(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_01_WAIT_MS", "7000") or "7000"), step=1000)
     mode_02_wait_ms = st.number_input("mode_02_wait IMAGE_ONLY(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_02_WAIT_MS", "7000") or "7000"), step=1000)
     mode_03_wait_ms = st.number_input("mode_03_wait VIDEO_ONLY_CBO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_03_WAIT_MS", "9000") or "9000"), step=1000)
