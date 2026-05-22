@@ -110,6 +110,7 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
                 f"BLOG_VIDEO_ADS_PER_ADSET={blog_video_creatives}",
                 f"BLOG_TOTAL_ADS_PER_ADSET={blog_actual_creatives}",
                 f"BLOG_ADSET_NAME_PREFIX={'f_v_b_o_l' if is_blog_video else 'f_i_b_o_l'}",
+                f"BLOG_ADSET_NAME_TEMPLATE={values.get('BLOG_ADSET_NAME_TEMPLATE', '')}",
                 "BLOG_IMAGE_AD_NAME_PREFIX=f_i_b_o_l",
                 "BLOG_VIDEO_AD_NAME_PREFIX=f_v_b_o_l",
                 f"AD_FORMAT={'video' if is_blog_video else 'image'}",
@@ -314,8 +315,10 @@ def expected_blog_video_folder_name(adset_index: int, budget: str, schedule_time
     return f"{mmdd} {adset_index}번 광고세트-일예산 {budget_manwon}만원-영상 {video_count}개 익일 {hour}시"
 
 
-def build_blog_adset_name(index: int, video: bool = False) -> str:
+def build_blog_adset_name(index: int, video: bool = False, template: str = "") -> str:
     mmdd = datetime.now().strftime("%m%d")
+    if template.strip():
+        return template.strip().replace("{mmdd}", mmdd).replace("{date}", mmdd).replace("{index}", str(index))
     prefix = "f_v_b_o_l" if video else "f_i_b_o_l"
     return f"{prefix}_{mmdd}_{index}"
 
@@ -805,19 +808,26 @@ if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO"}:
     )
     blog_creative_count = st.number_input(
         "Ad creative count",
-        min_value=1,
+        min_value=0 if is_blog_video else 1,
         max_value=100,
-        value=int(env.get("AD_CREATIVE_COUNT", "4") or "4"),
+        value=max(0 if is_blog_video else 1, int(env.get("AD_CREATIVE_COUNT", "4") or "4")),
         help=(
-            "광고 소재 복제 수입니다. 실제 매체 소재 수는 입력값 + 1개입니다. BLOG_VIDEO는 실제 소재가 모두 영상입니다. 예: 4 입력 -> 실제 영상 5개."
+            "광고 소재 복제 수입니다. 실제 매체 소재 수는 입력값 + 1개입니다. BLOG_VIDEO는 실제 소재가 모두 영상입니다. 예: 0 입력 -> 실제 영상 1개, 4 입력 -> 실제 영상 5개."
             if is_blog_video
             else "광고 소재 복제 수입니다. 실제 매체 소재 수는 입력값 + 1개입니다. 마지막 1개는 영상이고, 나머지는 이미지입니다. 예: 4 입력 -> 실제 5개, 이미지 4개 + 영상 1개."
         ),
+    )
+    default_blog_adset_template = "f_v_b_o_l_{mmdd}_{index}" if is_blog_video else "f_i_b_o_l_{mmdd}_{index}"
+    blog_adset_name_template = st.text_input(
+        "Adset name template",
+        value=env.get("BLOG_ADSET_NAME_TEMPLATE", default_blog_adset_template),
+        help="광고세트명 템플릿입니다. {index}만 광고세트 번호로 바뀝니다. {mmdd}도 사용할 수 있습니다. 예: 블로그 랜딩 {index}번 세트",
     )
     blog_actual_creative_count = int(blog_creative_count) + 1
     blog_image_count = 0 if is_blog_video else max(blog_actual_creative_count - 1, 1)
     blog_video_count = blog_actual_creative_count if is_blog_video else 1
     next_env["AD_CREATIVE_COUNT"] = str(blog_creative_count)
+    next_env["BLOG_ADSET_NAME_TEMPLATE"] = blog_adset_name_template
     blog_root = st.text_input("Blog asset root", value=env.get("BLOG_ASSET_ROOT", default_blog_root()))
     next_env["BLOG_ASSET_ROOT"] = blog_root
     blog_video_files = list_video_files_for_preview(blog_root) if is_blog_video else []
@@ -857,7 +867,7 @@ if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO"}:
         blog_preview_rows.append(
             {
                 "adset_index": index,
-                "adset_name": build_blog_adset_name(index, video=is_blog_video),
+                "adset_name": build_blog_adset_name(index, video=is_blog_video, template=blog_adset_name_template),
                 "landing_url": landing_url or "(missing)",
                 "image_ads": ", ".join(image_names) if image_names else "-",
                 "video_ads": ", ".join(video_names),

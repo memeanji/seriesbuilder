@@ -297,7 +297,9 @@ BLOG_ASSET_ROOT=./assets/blog
 
 - 광고세트별 랜딩 URL은 `BLOG_LANDING_URL_N`으로 직접 입력합니다.
 - `AD_CREATIVE_COUNT=4`이면 실제 동영상 광고 5개가 생성됩니다.
+- `AD_CREATIVE_COUNT=0`이면 실제 동영상 광고 1개만 생성됩니다.
 - 광고세트명 기본 규칙: `f_v_b_o_l_MMDD_{adset_index}`
+- 광고세트명은 Streamlit의 `Adset name template`에서 직접 지정할 수 있습니다. `{index}`는 광고세트 번호로, `{mmdd}`는 날짜로 치환됩니다.
 - 광고명 기본 규칙: `f_v_b_o_l_MMDD_{global_ad_index}`
 - 각 광고세트 폴더에는 실제 소재 수만큼 영상 파일이 있어야 합니다.
 - 또는 `BLOG_ASSET_ROOT` 폴더 안에 영상을 한 번에 넣으면 파일명 순서대로 광고세트별로 끊어서 사용합니다.
@@ -313,6 +315,7 @@ BLOG_IMAGE_ADS_PER_ADSET=0
 BLOG_VIDEO_ADS_PER_ADSET=3
 BLOG_TOTAL_ADS_PER_ADSET=3
 BLOG_ADSET_NAME_PREFIX=f_v_b_o_l
+BLOG_ADSET_NAME_TEMPLATE=블로그 영상 {index}번 세트
 BLOG_VIDEO_AD_NAME_PREFIX=f_v_b_o_l
 BLOG_LANDING_URL_1=https://example.com/blog-1
 BLOG_LANDING_URL_2=https://example.com/blog-2

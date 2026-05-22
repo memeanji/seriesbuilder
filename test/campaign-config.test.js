@@ -120,6 +120,14 @@ test('BLOG_VIDEO normalizes and defaults adset names to video prefix', () => {
   assert.equal(buildBlogAdsetName(1, env, fixedDate), 'f_v_b_o_l_0520_1');
 });
 
+test('BLOG adset name template changes only index/date tokens', () => {
+  const env = blogEnv(process.cwd(), {
+    CAMPAIGN_MODE: 'BLOG_VIDEO',
+    BLOG_ADSET_NAME_TEMPLATE: '블로그 영상 {mmdd} 세트 {index}',
+  });
+  assert.equal(buildBlogAdsetName(3, env, fixedDate), '블로그 영상 0520 세트 3');
+});
+
 test('missing landing URL fails when ADSET_COUNT requires it', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-plan-'));
   await createBlogAssets(root, 5);
@@ -379,6 +387,30 @@ test('BLOG_VIDEO can split flat root videos sequentially by adset', async () => 
     'f_v_b_o_l_0520_4.mp4',
     'f_v_b_o_l_0520_5.mp4',
     'f_v_b_o_l_0520_6.mp4',
+  ]);
+});
+
+test('BLOG_VIDEO allows AD_CREATIVE_COUNT zero for one video creative per adset', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-one-plan-'));
+  await createFlatBlogVideoAssets(root, 2);
+  const plan = await buildBlogMixedPlan(blogEnv(root, {
+    CAMPAIGN_MODE: 'BLOG_VIDEO',
+    ADSET_COUNT: '2',
+    AD_CREATIVE_COUNT: '0',
+    BLOG_IMAGE_ADS_PER_ADSET: '0',
+    BLOG_VIDEO_ADS_PER_ADSET: '1',
+    BLOG_TOTAL_ADS_PER_ADSET: '1',
+    BLOG_ADSET_NAME_TEMPLATE: '블로그 영상 {index}번',
+  }), { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.totalAdsPerAdset, 1);
+  assert.equal(plan.videoAdsPerAdset, 1);
+  assert.equal(plan.adsets[0].name, '블로그 영상 1번');
+  assert.deepEqual(plan.adsets[0].ads.map((ad) => `${ad.type}:${ad.name}`), [
+    'video:f_v_b_o_l_0520_1',
+  ]);
+  assert.deepEqual(plan.adsets[1].ads.map((ad) => `${ad.type}:${ad.name}`), [
+    'video:f_v_b_o_l_0520_2',
   ]);
 });
 

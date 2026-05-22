@@ -82,6 +82,13 @@ export function buildBlogAdsetName(adsetIndex, env = process.env, date = new Dat
     timezone: env.TIMEZONE || 'Asia/Seoul',
     dateFormat: env.DATE_FORMAT || 'MMDD',
   });
+  const template = String(env.BLOG_ADSET_NAME_TEMPLATE || '').trim();
+  if (template) {
+    return template
+      .replaceAll('{mmdd}', today)
+      .replaceAll('{date}', today)
+      .replaceAll('{index}', String(adsetIndex));
+  }
   return `${prefix}_${today}_${adsetIndex}`;
 }
 
@@ -568,7 +575,8 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
   const imageAdsPerAdset = totalAdsPerAdset - videoAdsPerAdset;
 
   if (adsetCount < 1) throw new Error('ADSET_COUNT must be >= 1.');
-  if (adCreativeDuplicateCount < 1) throw new Error('AD_CREATIVE_COUNT must be >= 1 for BLOG_MIXED/BLOG_VIDEO.');
+  if (!isBlogVideo && adCreativeDuplicateCount < 1) throw new Error('AD_CREATIVE_COUNT must be >= 1 for BLOG_MIXED.');
+  if (isBlogVideo && adCreativeDuplicateCount < 0) throw new Error('AD_CREATIVE_COUNT must be >= 0 for BLOG_VIDEO.');
   if (!isBlogVideo && imageAdsPerAdset < 1) throw new Error('BLOG_MIXED requires at least 1 image ad before the final video ad.');
 
   const adsets = [];
