@@ -2,60 +2,9 @@
 
 Playwright와 기존 Chrome CDP 세션을 사용해 Meta Ads Manager 화면을 자동 조작합니다.
 
-## Local job runner MVP
+## Wait/retry 설정
 
-배포형 Streamlit 서버는 직원 PC의 로컬 소재 폴더를 읽을 수 없기 때문에 실제 자동화는 각 직원의 Windows PC에서 로컬 Streamlit으로 실행합니다. `C:\meta_jobs` 아래에 job 폴더를 만들고, 공통 양식의 `mapping.xlsx`와 소재 폴더를 넣으면 Streamlit에서 job을 선택해 실행할 수 있습니다.
-
-권장 폴더 구조:
-
-```text
-C:\meta_jobs
- ├─ job_01
- │   ├─ images
- │   ├─ mapping.xlsx
- │   ├─ mapping.cache.json
- │   ├─ job_state.json
- │   └─ logs
- └─ job_02
-     ├─ images
-     ├─ mapping.xlsx
-     ├─ job_state.json
-     └─ logs
-```
-
-브라우저 프로필은 작업자별로 분리합니다.
-
-```text
-C:\meta_profiles
- ├─ profile_01
- ├─ profile_02
- └─ profile_03
-```
-
-`mapping.xlsx` 기본 컬럼:
-
-- 파일명
-- 광고명
-- 제목
-- 본문문구
-- 랜딩URL
-- UTM
-- 캠페인명
-- 광고세트명
-
-Streamlit의 `Local job runner MVP` 영역에서 job root, profile root, profile을 선택하면 `mapping.xlsx`를 미리보고 `node src/job-runner.js`를 별도 PowerShell 창에서 실행합니다. Runner는 `launchPersistentContext`를 사용해 선택된 profile 폴더로 Meta 로그인 세션을 유지합니다.
-
-재시작 방식:
-
-- 소재 단위로 `job_state.json`을 저장합니다.
-- 실패 시 `failed_item`, `failed_step`, `error`, `screenshot`을 남깁니다.
-- 재실행하면 `failed_item`이 있으면 해당 소재부터, 없으면 `last_completed_item` 다음 소재부터 이어서 실행합니다.
-
-로그:
-
-- `logs/run.log`
-- `logs/error.log`
-- `logs/screenshots/*.png`
+Streamlit의 `공통 wait/retry 설정` 영역에서 Meta 화면 로딩과 버튼 탐색 대기시간을 조정할 수 있습니다.
 
 영상 소재:
 
@@ -63,7 +12,7 @@ Streamlit의 `Local job runner MVP` 영역에서 job root, profile root, profile
 - 업로드 후 파일명/썸네일/미리보기/다음 버튼 활성화 상태를 polling합니다.
 - 완료 확인이 애매하면 config의 fallback 대기를 적용한 뒤 실패 시 스크린샷과 로그를 남깁니다.
 
-공통 wait/retry 설정은 Streamlit의 `공통 wait/retry 설정` 영역에서 조정하고 `.env`에 저장할 수 있습니다.
+사용 가능한 설정값:
 
 - `WAIT_BASE_RETRY_COUNT`
 - `WAIT_BASE_RETRY_INTERVAL_MS`
