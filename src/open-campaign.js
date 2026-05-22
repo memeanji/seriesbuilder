@@ -3802,7 +3802,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         continue;
       }
 
-      if (isAlreadyTargetAdset && !isBlogAdsetCopyRow && adsetIndex <= adsetEndIndex) {
+      if (isAlreadyTargetAdset && !isAdsetCopy && !isBlogAdsetCopyRow && adsetIndex <= adsetEndIndex) {
         processedAdsetRows.add(rowKey);
         console.log('[STEP] adset name already changed - moving to next adset:', { targetAdsetName, rowKey });
         adsetIndex += 1;
