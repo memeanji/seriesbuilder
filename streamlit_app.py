@@ -388,6 +388,18 @@ def list_video_stems_for_preview(folder: str) -> list[str]:
     return [item.stem for item in sorted(files, key=lambda item: item.name.lower())]
 
 
+def list_video_files_for_preview(folder: str) -> list[str]:
+    folder_path = Path(folder).expanduser()
+    if not folder_path.exists() or not folder_path.is_dir():
+        return []
+    files = [
+        item.name
+        for item in folder_path.iterdir()
+        if item.is_file() and item.suffix.lower() in [".mp4", ".mov", ".m4v", ".webm"]
+    ]
+    return sorted(files, key=lambda name: [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", name)])
+
+
 def list_image_stems_for_preview(folder: str) -> list[str]:
     folder_path = Path(folder).expanduser()
     if not folder_path.exists() or not folder_path.is_dir():
@@ -433,6 +445,18 @@ def validate_form(values: dict[str, str]) -> list[str]:
         mode = values.get("CAMPAIGN_MODE")
         if not values.get("BLOG_ASSET_ROOT", "").strip():
             errors.append(f"BLOG_ASSET_ROOT is required for {mode}.")
+        elif mode == "BLOG_VIDEO":
+            root = values.get("BLOG_ASSET_ROOT", "").strip()
+            adset_count = int(values.get("ADSET_COUNT", "1") or "1")
+            videos_per_adset = int(values.get("AD_CREATIVE_COUNT", "4") or "4") + 1
+            required_videos = adset_count * videos_per_adset
+            flat_videos = list_video_files_for_preview(root)
+            has_adset_folders = all(
+                len(list_video_files_for_preview(str(Path(root).expanduser() / f"adset_{index}" / "videos"))) == videos_per_adset
+                for index in range(1, adset_count + 1)
+            )
+            if len(flat_videos) < required_videos and not has_adset_folders:
+                errors.append(f"BLOG_VIDEO requires {required_videos} root videos or {videos_per_adset} videos in each adset_N/videos folder. Found {len(flat_videos)} root videos.")
         adset_count = int(values.get("ADSET_COUNT", "1") or "1")
         for index in range(1, adset_count + 1):
             if not values.get(f"BLOG_LANDING_URL_{index}", "").strip():
@@ -751,12 +775,17 @@ if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO"}:
     next_env["AD_CREATIVE_COUNT"] = str(blog_creative_count)
     blog_root = st.text_input("Blog asset root", value=env.get("BLOG_ASSET_ROOT", default_blog_root()))
     next_env["BLOG_ASSET_ROOT"] = blog_root
+    blog_video_files = list_video_files_for_preview(blog_root) if is_blog_video else []
 
     with st.expander("Expected folder names", expanded=True):
         if is_blog_video:
             total_video_count = int(adset_count) * blog_video_count
             st.write(f"`{blog_root}` 폴더 안의 영상 파일을 파일명 순서대로 읽습니다.")
             st.write(f"필요 영상 수: `{total_video_count}`개 = 광고세트 `{adset_count}`개 x 세트당 영상 `{blog_video_count}`개")
+            st.write(f"현재 루트 폴더 영상 수: `{len(blog_video_files)}`개")
+            if blog_video_files:
+                st.caption("정렬 preview")
+                st.write(", ".join(blog_video_files[: min(10, len(blog_video_files))]))
             for index in range(1, int(adset_count) + 1):
                 first = ((index - 1) * blog_video_count) + 1
                 last = index * blog_video_count
@@ -798,6 +827,12 @@ if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO"}:
         st.write(f"Image creatives per adset: `{blog_image_count}`")
         st.write(f"Video creatives per adset: `{blog_video_count}`")
         st.write(f"Blog asset root: `{blog_root}`")
+        if is_blog_video:
+            required_videos = int(adset_count) * blog_video_count
+            if len(blog_video_files) >= required_videos:
+                st.success(f"Root folder videos ready: {len(blog_video_files)} / {required_videos}")
+            else:
+                st.error(f"Root folder videos missing: {len(blog_video_files)} / {required_videos}")
         st.dataframe(blog_preview_rows, use_container_width=True)
         missing_urls = [row["adset_index"] for row in blog_preview_rows if row["landing_url"] == "(missing)"]
         if missing_urls:
