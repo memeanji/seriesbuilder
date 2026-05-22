@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -255,6 +256,33 @@ def write_run_env_snapshot(values: dict[str, str], profile_slot: str) -> tuple[P
     safe_profile = re.sub(r"[^A-Za-z0-9_-]+", "_", profile_slot or "profile")
     snapshot_path = RUN_ENV_DIR / f"run-{timestamp}-{safe_profile}.env"
     return snapshot_path, write_env(values, snapshot_path)
+
+
+def latest_failed_resume_point() -> dict[str, str]:
+    summary_files = sorted(
+        (APP_DIR / "logs").glob("run-summary-*.json"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    for summary_file in summary_files:
+        try:
+            payload = json.loads(summary_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if payload.get("status") != "error":
+            continue
+        context = payload.get("context") or {}
+        ad_index = context.get("current_ad_index")
+        ad_name = context.get("current_ad_name")
+        if ad_index and ad_name:
+            return {
+                "RESUME_FROM_AD_INDEX": str(ad_index),
+                "RESUME_FROM_AD_NAME": str(ad_name),
+                "CURRENT_STEP": str(context.get("current_step") or ""),
+                "CURRENT_ADSET_NAME": str(context.get("current_adset_name") or ""),
+                "SUMMARY_FILE": str(summary_file),
+            }
+    return {}
 
 
 def default_blog_root() -> str:
@@ -550,6 +578,23 @@ with st.expander("공통 wait/retry 설정", expanded=False):
 
 with st.expander("실패 지점부터 재실행", expanded=False):
     st.caption("광고명 변경/소재 업로드 중 중단된 경우, 실패한 광고 번호 또는 광고명을 넣고 다시 실행하면 해당 광고부터 이어서 처리합니다.")
+    latest_resume = latest_failed_resume_point()
+    if latest_resume:
+        st.write(
+            f"최근 실패 지점: `{latest_resume['RESUME_FROM_AD_NAME']}` "
+            f"(index `{latest_resume['RESUME_FROM_AD_INDEX']}`, step `{latest_resume['CURRENT_STEP']}`)"
+        )
+        if st.button("Load latest failed resume point"):
+            updated_env = {**env, **latest_resume}
+            updated_env.pop("CURRENT_STEP", None)
+            updated_env.pop("CURRENT_ADSET_NAME", None)
+            updated_env.pop("SUMMARY_FILE", None)
+            write_env(updated_env)
+            st.success(f"Resume point saved: {latest_resume['RESUME_FROM_AD_NAME']}")
+            st.toast("실패 지점을 .env에 저장했습니다. 새 터미널로 이어서 실행할 수 있어요.")
+            st.rerun()
+    else:
+        st.caption("최근 실패 run-summary를 아직 찾지 못했습니다.")
     resume_from_ad_index = st.number_input(
         "Resume from ad index",
         min_value=1,
