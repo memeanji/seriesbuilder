@@ -160,10 +160,21 @@ AD_CREATIVE_COUNT=4
 ADSET_DAILY_BUDGET=100000
 
 CDP_URL=http://127.0.0.1:9222
+CHROME_PROFILE_DIR=C:\meta_profiles\profile_01
 SCHEDULE_TIME=05:00
 MEDIA_FOLDER_PATH=
 IMAGE_ONLY_UPLOAD_MODE=PER_AD
 IMAGE_ONLY_ASSET_ROOT=
+```
+
+`CHROME_PROFILE_DIR`는 Meta 로그인 세션을 저장하는 Chrome 프로필 폴더입니다. 직원별로 동시에 쓰거나 계정을 분리하려면 서로 다른 폴더를 지정하세요.
+
+예:
+
+```text
+C:\meta_profiles\profile_01
+C:\meta_profiles\profile_02
+C:\meta_profiles\profile_03
 ```
 
 ## IMAGE_ONLY 모드

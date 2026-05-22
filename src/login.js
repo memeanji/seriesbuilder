@@ -1,6 +1,8 @@
 import 'dotenv/config';
 
-console.log('[LOGIN] 이 프로젝트는 로그인 자동화를 수행하지 않습니다.');
-console.log('[LOGIN] 일반 Chrome을 아래처럼 직접 실행하고 로그인 상태를 준비하세요:');
-console.log('  chrome.exe --remote-debugging-port=9222 --user-data-dir="C:\\chrome-debug"');
-console.log('[LOGIN] 이후 npm run open-campaign 을 실행하면 기존 Chrome 세션에 attach해서 자동화를 진행합니다.');
+const profileDir = process.env.CHROME_PROFILE_DIR || 'C:\\meta_profiles\\profile_01';
+
+console.log('[LOGIN] This project does not run an automatic login flow.');
+console.log('[LOGIN] Open Chrome with CDP and sign in to Meta Ads Manager first:');
+console.log(`  chrome.exe --remote-debugging-port=9222 --user-data-dir="${profileDir}"`);
+console.log('[LOGIN] Then run `npm run open-campaign` to attach to that Chrome session.');

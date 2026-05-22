@@ -13,6 +13,7 @@ APP_DIR = Path(__file__).resolve().parent
 ENV_PATH = APP_DIR / ".env"
 ADS_MANAGER_URL = "https://adsmanager.facebook.com/adsmanager/manage/campaigns"
 DEFAULT_ACCOUNT_ID = "1838892106940197"
+DEFAULT_CHROME_PROFILE_DIR = r"C:\meta_profiles\profile_01"
 IS_WINDOWS = os.name == "nt"
 IS_STREAMLIT_CLOUD = bool(os.environ.get("STREAMLIT_RUNTIME") or os.environ.get("STREAMLIT_SHARING_MODE"))
 NOTIFICATION_DEFAULTS = {
@@ -59,6 +60,7 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
         f"ADSET_COUNT={values.get('ADSET_COUNT', '1')}",
         f"ADSET_DAILY_BUDGET={values.get('ADSET_DAILY_BUDGET', '100000')}",
         f"CDP_URL={values.get('CDP_URL', 'http://127.0.0.1:9222')}",
+        f"CHROME_PROFILE_DIR={values.get('CHROME_PROFILE_DIR', DEFAULT_CHROME_PROFILE_DIR)}",
         f"SCHEDULE_TIME={values.get('SCHEDULE_TIME', '05:00')}",
         f"LANDING_PATH_NUMBER={values.get('LANDING_PATH_NUMBER', '100')}",
         "",
@@ -476,14 +478,20 @@ with st.sidebar:
         subprocess.Popen(["code.cmd", str(ENV_PATH)], cwd=APP_DIR, shell=False)
         st.info(".env open requested.")
 
+    chrome_profile_dir = st.text_input(
+        "Chrome profile directory",
+        value=env.get("CHROME_PROFILE_DIR", DEFAULT_CHROME_PROFILE_DIR),
+        help="Meta 로그인 세션을 저장할 Chrome 프로필 폴더입니다. 직원별로 profile_01, profile_02처럼 다르게 지정하면 됩니다.",
+    )
+
     if st.button("Open Chrome CDP", disabled=not IS_WINDOWS):
         account_id = env.get("AD_ACCOUNT_ID", DEFAULT_ACCOUNT_ID)
         url = f"{ADS_MANAGER_URL}?act={account_id}"
         chrome = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-        command = f'& "{chrome}" --remote-debugging-port=9222 --user-data-dir="C:\\chrome-debug" "{url}"'
+        command = f'& "{chrome}" --remote-debugging-port=9222 --user-data-dir="{chrome_profile_dir}" "{url}"'
         try:
             start_powershell(command)
-            st.info("Chrome CDP PowerShell opened.")
+            st.info(f"Chrome CDP PowerShell opened with profile: {chrome_profile_dir}")
         except Exception as exc:
             st.error(f"Chrome CDP launcher is unavailable here: {exc}")
 
@@ -578,6 +586,7 @@ next_env: dict[str, str] = {
     "ADSET_COUNT": str(adset_count),
     "ADSET_DAILY_BUDGET": daily_budget,
     "CDP_URL": cdp_url,
+    "CHROME_PROFILE_DIR": chrome_profile_dir,
     "SCHEDULE_TIME": schedule_time,
     "LANDING_PATH_NUMBER": env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")),
     "ENABLE_DESKTOP_ALERT": str(enable_desktop_alert).lower(),
