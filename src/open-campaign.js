@@ -166,10 +166,10 @@ function getWaitTimeoutLocation() {
 
 function classifyWaitTimeout(ms, location = '', nearby = '') {
   const text = `${location} ${nearby}`.toLowerCase();
-  if (text.includes('video') || text.includes('upload') || text.includes('media') || ms >= 30000) return '영상 소재일 때만 필요';
-  if (text.includes('locator') || text.includes('button') || text.includes('input') || text.includes('visible') || text.includes('search')) return 'locator.waitFor로 대체 가능';
-  if (ms <= 700) return '삭제 가능';
-  return '필요';
+  if (text.includes('video') || text.includes('upload') || text.includes('media') || ms >= 30000) return 'video_only';
+  if (text.includes('locator') || text.includes('button') || text.includes('input') || text.includes('visible') || text.includes('search')) return 'replace_with_locator_wait';
+  if (ms <= 700) return 'removable';
+  return 'needed';
 }
 
 function installWaitForTimeoutProfiler(page) {
@@ -359,7 +359,7 @@ async function collectWaitForTimeoutAudit() {
     const line = lines[index];
     const fnMatch = line.match(/^(?:async\s+)?function\s+([A-Za-z0-9_]+)/) || line.match(/^async\s+function\s+([A-Za-z0-9_]+)/);
     if (fnMatch) currentFunction = fnMatch[1];
-    if (!line.includes('waitForTimeout')) continue;
+    if (!/\bawait\s+page\.waitForTimeout\s*\(/.test(line)) continue;
     const nearby = lines.slice(Math.max(0, index - 3), Math.min(lines.length, index + 4)).join(' ');
     const msMatch = line.match(/waitForTimeout\(([^)]+)\)/);
     const waitExpression = msMatch?.[1]?.trim() || '';
@@ -384,7 +384,7 @@ async function writePerformanceReport(status, tracePath = '', error = null) {
   const slowestSteps = [...performanceEntries]
     .sort((a, b) => (b.duration_ms || 0) - (a.duration_ms || 0))
     .slice(0, 5);
-  const unnecessaryFixedWaits = staticWaitAudit.filter((item) => ['삭제 가능', 'locator.waitFor로 대체 가능'].includes(item.classification));
+  const unnecessaryFixedWaits = staticWaitAudit.filter((item) => ['removable', 'replace_with_locator_wait'].includes(item.classification));
   const payload = {
     status,
     generated_at: new Date().toISOString(),
@@ -399,10 +399,10 @@ async function writePerformanceReport(status, tracePath = '', error = null) {
     wait_for_timeout_audit: staticWaitAudit,
     unnecessary_fixed_waits: unnecessaryFixedWaits,
     suggestions: [
-      '우선 unnecessary_fixed_waits 중 locator.waitFor로 대체 가능 항목부터 화면 반영 조건 기반 대기로 바꾸세요.',
-      '영상 업로드/Meta 저장 직후 wait은 안정성 영향이 크므로 가장 마지막에 줄이세요.',
-      'slowest_steps_top5에서 반복적으로 느린 step을 먼저 개선하세요.',
-      'trace_path를 Playwright Trace Viewer에서 열어 실제 액션 대기 지점을 확인하세요.',
+      'Start with unnecessary_fixed_waits items classified as replace_with_locator_wait.',
+      'Keep waits after video upload and Meta save conservative until traces prove they are safe to reduce.',
+      'Optimize steps that repeatedly appear in slowest_steps_top5 first.',
+      'Open trace_path in Playwright Trace Viewer to inspect the exact slow action.',
     ],
   };
   await fs.writeFile(reportPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8');
@@ -650,6 +650,65 @@ async function ensureLoggedInOrThrow(page) {
   if (/facebook\.com\/(login|checkpoint)/i.test(currentUrl)) {
     throw new Error('Meta login page was detected. Please log in to Meta in Chrome, then run the automation again.');
   }
+}
+
+async function ensureCampaignTab(page) {
+  const campaignsUrl = `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${AD_ACCOUNT_ID}`;
+  const isCampaignsUrl = () => /\/adsmanager\/manage\/campaigns\b/i.test(page.url());
+
+  if (isCampaignsUrl()) {
+    console.log('[STEP] campaign tab confirmed');
+    return true;
+  }
+
+  const clickCampaignNav = async (attempt) => {
+    const exactCampaign = /^캠페인$/;
+    const candidates = [
+      { name: 'role link exact 캠페인', locator: page.getByRole('link', { name: exactCampaign }).first() },
+      { name: 'role button exact 캠페인', locator: page.getByRole('button', { name: exactCampaign }).first() },
+      { name: 'text exact 캠페인', locator: page.getByText(exactCampaign).first() },
+      { name: 'role link exact Campaigns', locator: page.getByRole('link', { name: /^Campaigns$/i }).first() },
+      { name: 'text exact Campaigns', locator: page.getByText(/^Campaigns$/i).first() },
+    ];
+
+    for (const candidate of candidates) {
+      const visible = await candidate.locator.isVisible({ timeout: 1500 }).catch(() => false);
+      if (!visible) continue;
+      const box = await candidate.locator.boundingBox().catch(() => null);
+      console.log('[DEBUG] campaign tab nav candidate:', { attempt, name: candidate.name, box });
+      await candidate.locator.click({ timeout: 5000 }).catch(async () => {
+        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+      return true;
+    }
+    return false;
+  };
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    console.warn('[WARN] campaign tab not active - forcing campaigns view:', { attempt, url: page.url() });
+    const clicked = await clickCampaignNav(attempt);
+    if (!clicked) {
+      console.log('[STEP] campaign tab nav not found - reopening campaigns URL');
+      await page.goto(campaignsUrl, { waitUntil: 'domcontentloaded' });
+    }
+    await page.waitForLoadState('domcontentloaded').catch(() => null);
+    await page.waitForURL(/\/adsmanager\/manage\/campaigns\b/i, { timeout: 5000 }).catch(() => null);
+    if (isCampaignsUrl()) {
+      console.log('[STEP] campaign tab forced successfully');
+      return true;
+    }
+    await page.waitForTimeout(1000);
+  }
+
+  await page.goto(campaignsUrl, { waitUntil: 'domcontentloaded' });
+  await page.waitForURL(/\/adsmanager\/manage\/campaigns\b/i, { timeout: 7000 }).catch(() => null);
+  if (isCampaignsUrl()) {
+    console.log('[STEP] campaign tab forced by URL');
+    return true;
+  }
+
+  await debugDump(page, 'campaign tab force failed');
+  throw new Error(`캠페인 탭 강제 진입 실패: current URL=${page.url()}`);
 }
 
 async function trySearchBox(page, keyword) {
@@ -4249,7 +4308,7 @@ async function runFlow(page) {
 
   console.log(`[STEP] 광고계정 이동: act=${AD_ACCOUNT_ID}`);
   await timedStep('open_ad_account', CAMPAIGN_NAME, () => page.goto(`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${AD_ACCOUNT_ID}`, { waitUntil: 'domcontentloaded' }));
-  await pause(page, '광고계정 이동 후 대기', 3000);
+  await timedStep('ensure_campaign_tab', CAMPAIGN_NAME, () => ensureCampaignTab(page));
   console.log('[DEBUG] URL:', page.url());
   console.log('[DEBUG] TITLE:', await page.title());
   await safeScreenshot(page, PATHS.step2, 'page screenshot');
@@ -4267,16 +4326,16 @@ async function runFlow(page) {
     await safeScreenshot(page, path.join(DIRS.screenshots, 'cbo-campaign-name-budget-filled.png'), 'cbo campaign name budget filled');
   } else {
     await timedStep('search_campaign', CAMPAIGN_NAME, () => trySearchBox(page, CAMPAIGN_NAME));
-  const campaignTarget = await timedStep('find_campaign', CAMPAIGN_NAME, () => findCampaignTarget(page, CAMPAIGN_NAME));
-  if (!campaignTarget) {
-    await logCampaignCandidates(page, 10);
-    throw new Error(`CAMPAIGN_NAME partial match 실패: ${CAMPAIGN_NAME}`);
-  }
+    const campaignTarget = await timedStep('find_campaign', CAMPAIGN_NAME, () => findCampaignTarget(page, CAMPAIGN_NAME));
+    if (!campaignTarget) {
+      await logCampaignCandidates(page, 10);
+      throw new Error(`CAMPAIGN_NAME partial match 실패: ${CAMPAIGN_NAME}`);
+    }
 
-  await timedStep('open_campaign', CAMPAIGN_NAME, () => campaignTarget.click());
-  await safeScreenshot(page, PATHS.step3, 'page screenshot');
-  await page.waitForLoadState('domcontentloaded');
-  await safeScreenshot(page, PATHS.step4, 'page screenshot');
+    await timedStep('open_campaign', CAMPAIGN_NAME, () => campaignTarget.click());
+    await safeScreenshot(page, PATHS.step3, 'page screenshot');
+    await page.waitForLoadState('domcontentloaded');
+    await safeScreenshot(page, PATHS.step4, 'page screenshot');
   }
 
   for (let n = 0; n < 1; n += 1) {
