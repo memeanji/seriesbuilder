@@ -3256,6 +3256,50 @@ async function clickMediaPickerNextButton(page, attemptLabel) {
   return clickMediaPickerButton(page, '다음', attemptLabel, 'ads-omp-primary-button');
 }
 
+async function clickOptionalMediaPickerNextButton(page, attemptLabel, timeoutMs = 5000) {
+  const labels = ['다음', 'Next'];
+  const exactPattern = /^\s*(?:다음|Next)\s*$/i;
+  const candidates = [
+    page.getByRole('button', { name: exactPattern }).first(),
+    page.locator('button, [role="button"]').filter({ hasText: exactPattern }).first(),
+  ];
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    for (const locator of candidates) {
+      const visible = await locator.isVisible({ timeout: 1000 }).catch(() => false);
+      if (!visible) continue;
+      const disabled = await locator.evaluate((el) => (
+        el.getAttribute('aria-disabled') === 'true' ||
+        el.getAttribute('aria-busy') === 'true' ||
+        el.hasAttribute('disabled') ||
+        Boolean(el.closest('[aria-disabled="true"], [aria-busy="true"]'))
+      )).catch(() => false);
+      if (disabled) continue;
+
+      const text = await locator.innerText().catch(() => '');
+      const box = await locator.boundingBox().catch(() => null);
+      console.log('[DEBUG] optional media picker next candidate:', {
+        attemptLabel,
+        labels,
+        text,
+        box,
+      });
+      await locator.scrollIntoViewIfNeeded().catch(() => null);
+      await locator.click({ force: true }).catch(async () => {
+        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+      await page.waitForTimeout(1500);
+      console.log('[STEP] optional media picker next clicked:', { attemptLabel, text });
+      return true;
+    }
+    await page.waitForTimeout(500);
+  }
+
+  console.log('[DEBUG] optional media picker next not visible:', { attemptLabel, timeoutMs });
+  return false;
+}
+
 async function clickMediaPickerDoneButton(page, attemptLabel) {
   return clickMediaPickerButton(page, '완료', attemptLabel, 'ads-omp-primary-button');
 }
@@ -3382,6 +3426,11 @@ async function completeMediaPickerNextAndOriginalFlow(page, adFormat = 'image') 
   if (!textNext) {
     await debugDump(page, 'next button not found after text step');
     throw new Error('Could not find the Next button after text step.');
+  }
+
+  const generationNext = await clickOptionalMediaPickerNextButton(page, 'after-image-video-generation-step');
+  if (generationNext) {
+    console.log('[STEP] image video-generation extra next completed');
   }
 
   const doneClicked = await clickMediaPickerDoneButton(page, 'image-generation-complete');
