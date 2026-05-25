@@ -659,7 +659,7 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
     for (let imageIndex = 1; imageIndex <= imageAdsPerAdset; imageIndex += 1) {
       const globalAdIndex = adIndexBase + imageIndex;
       const defaultImageAdName = buildBlogImageAdName(globalAdIndex, env, date);
-      const imageAdName = env.NAMING_AD_TEMPLATE
+      const imageAdName = (env.NAMING_AD_TEMPLATE && isBlogVideo)
         ? renderNameTemplate(env.NAMING_AD_TEMPLATE, {
           ...dateTokensForTemplate(date, env),
           idx: adsetIndex,
@@ -685,7 +685,7 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
       const videoAdIndex = adIndexBase + imageAdsPerAdset + videoIndex;
       const currentVideoAsset = videoAssets[videoIndex - 1];
       const defaultVideoAdName = buildBlogVideoAdName(videoAdIndex, env, date);
-      const videoAdName = env.NAMING_AD_TEMPLATE
+      const videoAdName = (env.NAMING_AD_TEMPLATE && isBlogVideo)
         ? renderNameTemplate(env.NAMING_AD_TEMPLATE, {
           ...dateTokensForTemplate(date, env),
           idx: adsetIndex,

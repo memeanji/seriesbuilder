@@ -401,6 +401,24 @@ test('BLOG_MIXED uses AD_CREATIVE_COUNT plus one and puts video last', async () 
   ]);
 });
 
+test('BLOG_MIXED keeps image/video prefix names instead of adset_name suffix template', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-mixed-name-rule-'));
+  await createBlogAssets(root, 1, 2);
+  const plan = await buildBlogMixedPlan(blogEnv(root, {
+    ADSET_COUNT: '1',
+    AD_CREATIVE_COUNT: '2',
+    BLOG_IMAGE_ADS_PER_ADSET: '2',
+    BLOG_TOTAL_ADS_PER_ADSET: '3',
+    NAMING_AD_TEMPLATE: '{adset_name}_{ad_idx}',
+  }), { baseDir: root, date: fixedDate });
+  assert.equal(plan.adsets[0].name, 'f_i_b_o_l_0520_1');
+  assert.deepEqual(plan.adsets[0].ads.map((ad) => ad.name), [
+    'f_i_b_o_l_0520_1',
+    'f_i_b_o_l_0520_2',
+    'f_v_b_o_l_0520_3',
+  ]);
+});
+
 test('BLOG_VIDEO uses AD_CREATIVE_COUNT plus one and makes every creative video', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-plan-'));
   await createBlogVideoAssets(root, 2, 3);

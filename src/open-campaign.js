@@ -3745,6 +3745,51 @@ async function clickOptionalMediaPickerNextButton(page, attemptLabel, timeoutMs 
   return false;
 }
 
+async function clickOptionalMediaPickerButton(page, buttonText, attemptLabel, timeoutMs = 5000) {
+  const labelGroups = {
+    다음: ['다음', 'Next'],
+    완료: ['완료', 'Done'],
+    '건너뛰고 계속하기': ['건너뛰고 계속하기', '건너뛰고 계속', 'Skip and continue', 'Skip and Continue'],
+  };
+  const labels = labelGroups[buttonText] || [buttonText];
+  const escapedLabels = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const exactPattern = new RegExp(`^\\s*(?:${escapedLabels.join('|')})\\s*$`, 'i');
+  const containsPattern = new RegExp(`(?:${escapedLabels.join('|')})`, 'i');
+  const candidates = [
+    page.getByRole('button', { name: exactPattern }).first(),
+    page.locator('button, [role="button"]').filter({ hasText: exactPattern }).first(),
+    page.locator('button, [role="button"]').filter({ hasText: containsPattern }).first(),
+  ];
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    for (const locator of candidates) {
+      const visible = await locator.isVisible({ timeout: 800 }).catch(() => false);
+      if (!visible) continue;
+      const disabled = await locator.evaluate((el) => (
+        el.getAttribute('aria-disabled') === 'true' ||
+        el.getAttribute('aria-busy') === 'true' ||
+        el.hasAttribute('disabled') ||
+        Boolean(el.closest('[aria-disabled="true"], [aria-busy="true"]'))
+      )).catch(() => false);
+      if (disabled) continue;
+
+      const box = await locator.boundingBox().catch(() => null);
+      const text = await locator.innerText().catch(() => '');
+      await locator.scrollIntoViewIfNeeded().catch(() => null);
+      await locator.click({ force: true }).catch(async () => {
+        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      });
+      await page.waitForTimeout(1200);
+      console.log('[STEP] optional media picker button clicked:', { buttonText, attemptLabel, text });
+      return true;
+    }
+    await page.waitForTimeout(400);
+  }
+  console.log('[DEBUG] optional media picker button not visible:', { buttonText, attemptLabel, timeoutMs });
+  return false;
+}
+
 async function clickMediaPickerDoneButton(page, attemptLabel) {
   return clickMediaPickerButton(page, '완료', attemptLabel, 'ads-omp-primary-button');
 }
@@ -3808,84 +3853,59 @@ async function getOriginalRadioStatus(page) {
     .catch(() => []);
 }
 
-async function completeVideoMediaPickerFlow(page) {
-  const selectedNext = await clickMediaPickerNextButton(page, 'video-after-media-select');
+async function completeFlexibleMediaPickerFlow(page, adFormat = 'image') {
+  const selectedNext = await clickMediaPickerNextButton(page, `${adFormat}-after-media-select`);
   if (!selectedNext) {
-    await debugDump(page, 'next button not found after video media select');
-    throw new Error('Could not find the Next button after selecting video media.');
+    await debugDump(page, `next button not found after ${adFormat} media select`);
+    throw new Error(`Could not find the Next button after selecting ${adFormat} media.`);
   }
 
-  const skipped = await clickMediaPickerSkipAndContinueButton(page, 'video-skip-processing');
-  if (!skipped) {
-    await debugDump(page, 'skip and continue button not found after video next');
-    throw new Error('Could not find the Skip and continue button after video Next.');
+  for (let step = 1; step <= 7; step += 1) {
+    await page.waitForTimeout(step === 1 ? 1000 : 500);
+    const selectedOriginalCount = await selectAllOriginalRadios(page);
+    if (selectedOriginalCount) {
+      const originalStatus = await getOriginalRadioStatus(page);
+      console.log('[STEP] media picker original ratio selection status:', {
+        adFormat,
+        step,
+        total: originalStatus.length,
+        checked: originalStatus.filter((radio) => radio.checked).length,
+      });
+    }
+
+    const skipped = await clickOptionalMediaPickerButton(page, '건너뛰고 계속하기', `${adFormat}-flex-step-${step}-skip`, 2500);
+    if (skipped) {
+      console.log('[STEP] media picker skip/continue completed:', { adFormat, step });
+      continue;
+    }
+
+    const doneClicked = await clickOptionalMediaPickerButton(page, '완료', `${adFormat}-flex-step-${step}-done`, 2500);
+    if (doneClicked) {
+      await page.waitForTimeout(4000);
+      console.log('[STEP] flexible media picker flow completed:', { adFormat, step });
+      return;
+    }
+
+    const nextClicked = await clickOptionalMediaPickerNextButton(page, `${adFormat}-flex-step-${step}-next`, 3000);
+    if (nextClicked) {
+      console.log('[STEP] flexible media picker next completed:', { adFormat, step });
+      continue;
+    }
+
+    console.log('[WAIT] flexible media picker step did not expose next/done/skip yet:', { adFormat, step });
+    await page.waitForTimeout(WAIT_CONFIG.baseRetryIntervalMs);
   }
 
-  await page.waitForTimeout(1000);
-  await selectAllOriginalRadios(page);
-  const originalStatus = await getOriginalRadioStatus(page);
-  console.log('[STEP] video original ratio selection status:', {
-    total: originalStatus.length,
-    checked: originalStatus.filter((radio) => radio.checked).length,
-    originalStatus,
-  });
+  await debugDump(page, `flexible media picker flow did not finish ${adFormat}`);
+  throw new Error(`Could not complete the ${adFormat} media picker flow.`);
+}
 
-  const cropNext = await clickMediaPickerNextButton(page, 'video-after-original');
-  if (!cropNext) {
-    await debugDump(page, 'next button not found after video original');
-    throw new Error('Could not find the Next button after selecting video original ratio.');
-  }
-
-  const doneClicked = await clickMediaPickerDoneButton(page, 'video-generation-complete');
-  if (!doneClicked) {
-    await debugDump(page, 'done button not found after video generation');
-    throw new Error('Could not find the Done button after video generation step.');
-  }
-
-  await page.waitForTimeout(4000);
-  console.log('[STEP] video upload skip/original/done flow completed');
+async function completeVideoMediaPickerFlow(page) {
+  await completeFlexibleMediaPickerFlow(page, 'video');
 }
 
 async function completeMediaPickerNextAndOriginalFlow(page, adFormat = 'image') {
-  if (adFormat === 'video') {
-    await completeVideoMediaPickerFlow(page);
-    return;
-  }
-
-  const selectedNext = await clickMediaPickerNextButton(page, 'after-media-select');
-  if (!selectedNext) {
-    await debugDump(page, 'next button not found after media select');
-    throw new Error('Could not find the Next button after selecting image media.');
-  }
-
-  await page.waitForTimeout(400);
-  await selectAllOriginalRadios(page);
-
-  const cropNext = await clickMediaPickerNextButton(page, 'after-original-crop');
-  if (!cropNext) {
-    await debugDump(page, 'next button not found after original crop');
-    throw new Error('Could not find the Next button after original crop selection.');
-  }
-
-  const textNext = await clickMediaPickerNextButton(page, 'after-text-step');
-  if (!textNext) {
-    await debugDump(page, 'next button not found after text step');
-    throw new Error('Could not find the Next button after text step.');
-  }
-
-  const generationNext = await clickOptionalMediaPickerNextButton(page, 'after-image-video-generation-step');
-  if (generationNext) {
-    console.log('[STEP] image video-generation extra next completed');
-  }
-
-  const doneClicked = await clickMediaPickerDoneButton(page, 'image-generation-complete');
-  if (!doneClicked) {
-    await debugDump(page, 'done button not found after image generation');
-    throw new Error('Could not find the Done button after image generation step.');
-  }
-
-  await page.waitForTimeout(4000);
-  console.log('[STEP] image select/original/text/done flow completed');
+  await completeFlexibleMediaPickerFlow(page, adFormat);
 }
 
 async function fillLandingUrlOnly(page, targetAdName, landingUrl = '') {

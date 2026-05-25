@@ -83,6 +83,12 @@ def build_ad_url(url_mode: str, shared_url: str, path_numbers: list[int], ad_idx
     return f"{base_url.rstrip('/')}/{path_num}?utm_source=f&utm_medium=f&utm_campaign={ad_name}"
 
 
+def default_ad_name_for_media(media_type: str, global_index: int, mmdd: str) -> str:
+    if media_type == "video":
+        return f"f_v_b_o_l_{mmdd}_{global_index}"
+    return f"f_i_b_o_l_{mmdd}_{global_index}"
+
+
 def split_path_numbers(value: str, ad_count: int, default_path: int) -> list[int]:
     raw_items = [item.strip() for item in re.split(r"[,\s]+", value or "") if item.strip()]
     numbers: list[int] = []
@@ -908,6 +914,7 @@ with st.expander("Naming / URL templates", expanded=True):
     with template_col3:
         repurely_base_url = st.text_input("Repurely base URL", value=env.get("REPURELY_BASE_URL", "https://repurely.com/surl/P"))
     st.caption("지원 토큰: `{MMDD}`, `{YYMMDD}`, `{idx}`, `{ad_idx}`, `{adset_name}`")
+    st.caption("mixed 소재는 운영 규칙에 맞춰 광고명이 자동 고정됩니다: 이미지는 `f_i_b_o_l_MMDD_전체번호`, 마지막 영상은 `f_v_b_o_l_MMDD_전체번호`.")
 
 default_mode = env.get("CAMPAIGN_MODE", "IMAGE_ONLY")
 default_media = "mixed" if default_mode == "BLOG_MIXED" else ("video" if default_mode in {"BLOG_VIDEO", "BLOG_VIDEO_DIRECT", "VIDEO_ONLY_CBO"} else "image")
@@ -991,8 +998,12 @@ for adset_index in range(1, int(adset_count) + 1):
 
         for ad_idx in range(1, int(ad_count) + 1):
             media_for_ad = ad_media_type(media_type, ad_idx, int(ad_count))
+            global_ad_index = ((adset_index - 1) * int(ad_count)) + ad_idx
             try:
-                ad_name = render_template(naming_ad_template, {**tokens, "idx": adset_index, "ad_idx": ad_idx, "adset_name": adset_name})
+                if media_type == "mixed":
+                    ad_name = default_ad_name_for_media(media_for_ad, global_ad_index, tokens["MMDD"])
+                else:
+                    ad_name = render_template(naming_ad_template, {**tokens, "idx": adset_index, "ad_idx": global_ad_index, "adset_name": adset_name})
                 landing_url = build_ad_url(url_mode, shared_landing_url, path_numbers, ad_idx, ad_name, repurely_base_url)
             except (ValueError, IndexError) as exc:
                 ad_name = "(template error)"
