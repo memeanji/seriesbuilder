@@ -2327,22 +2327,39 @@ async function selectExistingAdsetRowByName(page, adsetName) {
   await ensureCampaignStructureRoot(page);
 
   for (let attempt = 1; attempt <= 18; attempt += 1) {
-    const candidate = page
-      .locator('[role="row"], [role="rowheader"], [id^="ads_campaign_structure_item_"], [id^="default-button-for-action-menu_"]')
-      .filter({ hasText: adsetName })
-      .first();
-    const visible = await candidate.isVisible({ timeout: 1500 }).catch(() => false);
-    if (visible) {
+    const candidateHandle = await page.evaluateHandle((name) => {
+      const normalize = (value) => String(value || '').replace(/\s+/g, '').toLowerCase();
+      const target = normalize(name);
+      const rows = [...document.querySelectorAll('[role="row"], [role="rowheader"], [id^="ads_campaign_structure_item_"]')];
+      const candidates = rows
+        .map((el) => {
+          const text = (el.innerText || el.textContent || '').trim();
+          const rowHeader = el.matches?.('[role="rowheader"]') ? el : el.querySelector?.('[role="rowheader"]');
+          const aria = el.getAttribute('aria-label') || rowHeader?.getAttribute('aria-label') || '';
+          const surface = el.closest?.('[data-surface]')?.getAttribute('data-surface') || el.querySelector?.('[data-surface]')?.getAttribute('data-surface') || '';
+          const normalizedText = normalize(text);
+          const isAdset = normalize(aria).includes('광고세트') || surface.includes('editor_tree:adset') || normalizedText.includes('광고세트');
+          const exact = normalizedText === target || normalizedText.includes(target);
+          const copy = /사본|copy/i.test(text);
+          const rect = el.getBoundingClientRect();
+          return { el, text, aria, surface, isAdset, exact, copy, y: rect.y, width: rect.width, height: rect.height };
+        })
+        .filter((item) => item.isAdset && item.exact && item.width > 0 && item.height > 0)
+        .sort((a, b) => (a.copy ? 1 : 0) - (b.copy ? 1 : 0) || a.y - b.y);
+      return candidates[0]?.el || null;
+    }, adsetName).catch(() => null);
+    const candidate = candidateHandle ? candidateHandle.asElement() : null;
+    if (candidate) {
       await candidate.scrollIntoViewIfNeeded().catch(() => null);
       const box = await candidate.boundingBox().catch(() => null);
       const text = (await candidate.innerText().catch(() => '')).trim();
       console.log('[DEBUG] resume target adset candidate:', { attempt, adsetName, text: text.slice(0, 180), box });
-      if (box) {
-        await page.mouse.click(box.x + Math.min(box.width / 2, 220), box.y + box.height / 2);
-      } else {
-        await candidate.click({ force: true });
+      if (!box) {
+        await page.waitForTimeout(1500);
+        continue;
       }
-      await page.waitForTimeout(5000);
+      await page.mouse.click(box.x + Math.min(box.width / 2, 220), box.y + box.height / 2);
+      await page.waitForTimeout(2500);
       console.log('[STEP] resume target adset row selected:', { adsetName });
       return true;
     }
@@ -4154,6 +4171,41 @@ async function fillAdNameAndVerify(page, adNameInput, targetAdName) {
   throw new Error(`Ad name input verification failed: expected=${targetAdName}, actual=${actualAdName}`);
 }
 
+async function findResumeAdsetBoundsFromRows(rows, adsetName) {
+  if (!adsetName) return null;
+  const target = normalizeText(adsetName);
+  const rowInfos = [];
+  for (const row of rows) {
+    const rowText = (await row.innerText().catch(() => '')).trim();
+    const box = await row.boundingBox().catch(() => null);
+    if (!rowText || !box) continue;
+    const rowMeta = await row.evaluate((el) => {
+      const rowHeader = el.matches?.('[role="rowheader"]') ? el : el.querySelector?.('[role="rowheader"]');
+      const surface = el.closest?.('[data-surface]') || el.querySelector?.('[data-surface]');
+      return {
+        ariaLabel: el.getAttribute('aria-label') || rowHeader?.getAttribute('aria-label') || '',
+        surface: surface?.getAttribute('data-surface') || '',
+      };
+    }).catch(() => ({ ariaLabel: '', surface: '' }));
+    const normalizedText = normalizeText(rowText);
+    const isAdset = normalizeText(rowMeta.ariaLabel).includes('광고세트') ||
+      rowMeta.surface.includes('editor_tree:adset') ||
+      normalizedText.includes('광고세트');
+    rowInfos.push({ rowText, normalizedText, box, isAdset });
+  }
+
+  const sorted = rowInfos.sort((a, b) => a.box.y - b.box.y);
+  const targetIndex = sorted.findIndex((row) => row.isAdset && row.normalizedText.includes(target));
+  if (targetIndex < 0) return null;
+  const targetRow = sorted[targetIndex];
+  const nextAdset = sorted.slice(targetIndex + 1).find((row) => row.isAdset && row.box.y > targetRow.box.y + 2);
+  return {
+    top: targetRow.box.y,
+    bottom: nextAdset ? nextAdset.box.y : Number.POSITIVE_INFINITY,
+    rowText: targetRow.rowText,
+  };
+}
+
 async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCount = 10, adCreativeCount = 5, options = {}) {
   console.log('[STEP] sequential adset/ad rename started');
 
@@ -4169,11 +4221,19 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
   const effectiveCreativeCount = adCreativeCount + 1;
   const adsetEndIndex = adsetStartIndex + effectiveAdsetCount - 1;
   const maxCreativeTotal = effectiveAdsetCount * effectiveCreativeCount;
-  const totalRenameTarget = (effectiveAdsetCount * effectiveCreativeCount) + effectiveAdsetCount;
   const resumeOnly = Boolean(options.resumeOnly);
+  const resumeTargetAdsetName = String(options.resumeTargetAdsetName || '').trim();
+  const resumeTargetPlanAdset = resumeOnly && resumeTargetAdsetName
+    ? (activeCampaignPlan?.adsets || []).find((adset) => normalizeText(adset.name || '') === normalizeText(resumeTargetAdsetName))
+    : null;
+  const resumeStopCreativeIndex = resumeTargetPlanAdset?.ads?.length
+    ? Math.max(...resumeTargetPlanAdset.ads.map((ad) => Number(ad.index || 0)).filter(Boolean))
+    : maxCreativeTotal;
+  const effectiveMaxCreativeTotal = resumeOnly ? resumeStopCreativeIndex : maxCreativeTotal;
+  const totalRenameTarget = (effectiveAdsetCount * effectiveCreativeCount) + effectiveAdsetCount;
   let adsetIndex = resumeOnly ? adsetEndIndex + 1 : adsetStartIndex;
   const maxRenameAttempts = resumeOnly
-    ? Math.max(20, (maxCreativeTotal - adCreativeIndex) + 8)
+    ? Math.max(20, (effectiveMaxCreativeTotal - adCreativeIndex) + 8)
     : totalRenameTarget;
   const processedAdsetRows = new Set();
   const processedAdRows = new Set();
@@ -4185,13 +4245,30 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
   );
 
   for (let attempt = 1; attempt <= maxRenameAttempts; attempt += 1) {
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(resumeOnly ? 1500 : 2500);
     let progressedThisAttempt = false;
 
     const rows = await page.locator('[role="row"]').elementHandles();
     if (!rows.length) {
       console.log(`[WAIT] rows not visible yet retry ${attempt}/${maxRenameAttempts}`);
       continue;
+    }
+    const resumeAdsetBounds = resumeOnly && resumeTargetAdsetName
+      ? await findResumeAdsetBoundsFromRows(rows, resumeTargetAdsetName)
+      : null;
+    if (resumeOnly && resumeTargetAdsetName && !resumeAdsetBounds) {
+      console.log('[WAIT] resume target adset bounds not visible yet:', { resumeTargetAdsetName, attempt });
+      await page.mouse.wheel(0, attempt <= 6 ? 450 : 900);
+      await page.waitForTimeout(attempt <= 6 ? 1500 : 3000);
+      continue;
+    }
+    if (resumeAdsetBounds) {
+      console.log('[DEBUG] resume target adset bounds:', {
+        resumeTargetAdsetName,
+        top: resumeAdsetBounds.top,
+        bottom: Number.isFinite(resumeAdsetBounds.bottom) ? resumeAdsetBounds.bottom : 'end',
+        rowText: resumeAdsetBounds.rowText.slice(0, 140),
+      });
     }
 
     for (const row of rows) {
@@ -4200,6 +4277,9 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
 
       const rowBox = await row.boundingBox().catch(() => null);
       if (!rowBox) continue;
+      if (resumeAdsetBounds && (rowBox.y <= resumeAdsetBounds.top + 2 || rowBox.y >= resumeAdsetBounds.bottom - 2)) {
+        continue;
+      }
 
       const rowId = await row
         .evaluate((el) => el.getAttribute('data-id') || el.id || el.querySelector('[data-id]')?.getAttribute('data-id') || '')
@@ -4305,7 +4385,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           });
           await page.mouse.click(rowBox.x + Math.min(rowBox.width / 2, 220), rowBox.y + rowBox.height / 2);
         }
-        await page.waitForTimeout(7000);
+        await page.waitForTimeout(4000);
 
         const directAdsetInput = page.locator('input[placeholder="여기에 광고 세트 이름을 입력하세요..."], input[placeholder="광고 세트 이름 지정"]').first();
         const directVisible = await directAdsetInput.isVisible({ timeout: 5000 }).catch(() => false);
@@ -4317,7 +4397,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
           await page.keyboard.press('Backspace');
           await page.keyboard.type(targetAdsetName, { delay: 60 });
-          await page.waitForTimeout(5000);
+          await page.waitForTimeout(3000);
           let actualAdsetName = await adsetInputHandle.evaluate((el) => el.value || '').catch(() => '');
           if (!actualAdsetName.includes(targetAdsetName)) {
             console.log('[DEBUG] adset rename keyboard fill mismatch - applying DOM fallback:', {
@@ -4365,7 +4445,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         } else {
           await page.mouse.click(rowBox.x + Math.min(rowBox.width / 2, 220), rowBox.y + rowBox.height / 2);
         }
-        await page.waitForTimeout(7000);
+        await page.waitForTimeout(4000);
 
         const adNameInput = page.locator('input[placeholder="여기에 광고 이름을 입력하세요..."], input[placeholder*="광고 이름"], input[value*="새 판매 광고"]').first();
         const visible = await adNameInput.isVisible({ timeout: 5000 }).catch(() => false);
@@ -4413,7 +4493,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         });
 
         await timedStep('input_url', targetAdName, () => fillLandingUrlOnly(page, targetAdName, targetLandingUrl));
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(targetAdFormat === 'video' ? 3000 : 2000);
         console.log('[STEP] landing URL step completed and stabilized:', { targetAdName });
 
         await timedStep('open_creative_settings', targetAdName, () => enterCreativeInsideEditor(page, targetAdFormat));
@@ -4465,13 +4545,14 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       adsetEndIndex,
       adCreativeIndex,
       maxCreativeTotal,
+      effectiveMaxCreativeTotal,
       effectiveAdsetCount,
       adCreativeCount,
       effectiveCreativeCount,
       totalRenameTarget,
     });
 
-    if (adsetIndex > adsetEndIndex && adCreativeIndex > maxCreativeTotal) {
+    if (adsetIndex > adsetEndIndex && adCreativeIndex > effectiveMaxCreativeTotal) {
       console.log('[STEP] sequential adset/ad rename completed');
       return true;
     }
@@ -4589,7 +4670,10 @@ async function runFlow(page) {
       await timedStep('resume_select_adset', resumeTargetAdset.name, () => selectExistingAdsetRowByName(page, resumeTargetAdset.name));
     }
     updateRunContext({ current_step: 'resume_rename_ads_and_upload_media' });
-    await timedStep('resume_rename_ads_and_upload_media', getEffectiveResumeAdName() || `ad_${resumeStartIndex}`, () => renameAdsetsAndAdsSequentially(page, (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount, { resumeOnly: true }));
+    await timedStep('resume_rename_ads_and_upload_media', getEffectiveResumeAdName() || `ad_${resumeStartIndex}`, () => renameAdsetsAndAdsSequentially(page, (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount, {
+      resumeOnly: true,
+      resumeTargetAdsetName: resumeTargetAdset?.name || '',
+    }));
     updateRunContext({ current_step: 'success' });
     return;
   }
