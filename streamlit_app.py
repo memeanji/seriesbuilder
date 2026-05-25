@@ -41,6 +41,20 @@ def env_bool(values: dict[str, str], key: str, default: str = "false") -> bool:
     return values.get(key, default).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def ms_caption(value: int | float) -> str:
+    seconds = float(value) / 1000
+    if seconds.is_integer():
+        return f"{int(seconds)}초"
+    return f"{seconds:.1f}초"
+
+
+def actual_creatives_per_adset(values: dict[str, str]) -> int:
+    try:
+        return max(1, int(values.get("AD_CREATIVE_COUNT", "4") or "4") + 1)
+    except ValueError:
+        return 5
+
+
 def read_env(path: Path = ENV_PATH) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
@@ -580,28 +594,42 @@ env = read_env()
 if "resume_mode_enabled" not in st.session_state:
     st.session_state.resume_mode_enabled = False
 
+mode_01_wait_ms = int(env.get("MODE_01_WAIT_MS", "10000") or "10000")
+mode_02_wait_ms = int(env.get("MODE_02_WAIT_MS", "5000") or "5000")
+mode_03_wait_ms = int(env.get("MODE_03_WAIT_MS", "12000") or "12000")
+mode_04_wait_ms = int(env.get("MODE_04_WAIT_MS", "6000") or "6000")
+mode_blog_video_wait_ms = int(env.get("MODE_BLOG_VIDEO_WAIT_MS", "12000") or "12000")
+auto_resume_wait_ms = int(env.get("AUTO_RESUME_WAIT_MS", "10000") or "10000")
+
 with st.expander("공통 wait/retry 설정", expanded=False):
+    st.caption("자주 조정하는 값만 남겼습니다. 괄호 안에 실제 초 단위를 같이 표시합니다.")
     wait_base_retry_count = st.number_input("기본 재시도 횟수", min_value=1, max_value=20, value=int(env.get("WAIT_BASE_RETRY_COUNT", "5") or "5"))
     wait_base_retry_interval = st.number_input("기본 재시도 간격(ms)", min_value=500, max_value=10000, value=int(env.get("WAIT_BASE_RETRY_INTERVAL_MS", "1500") or "1500"), step=500)
+    st.caption(f"기본 재시도 간격: {ms_caption(wait_base_retry_interval)}")
     wait_extended_retry_count = st.number_input("확장 재시도 횟수", min_value=1, max_value=20, value=int(env.get("WAIT_EXTENDED_RETRY_COUNT", "5") or "5"))
     wait_extended_retry_interval = st.number_input("확장 재시도 간격(ms)", min_value=1000, max_value=30000, value=int(env.get("WAIT_EXTENDED_RETRY_INTERVAL_MS", "7000") or "7000"), step=1000)
+    st.caption(f"확장 재시도 간격: {ms_caption(wait_extended_retry_interval)}")
     video_upload_timeout_ms = st.number_input("영상 업로드 확인 timeout(ms)", min_value=30000, max_value=300000, value=int(env.get("VIDEO_UPLOAD_TIMEOUT_MS", "180000") or "180000"), step=10000)
+    st.caption(f"영상 업로드 확인 timeout: {ms_caption(video_upload_timeout_ms)}")
     video_upload_fallback_wait_ms = st.number_input("영상 fallback 대기(ms)", min_value=30000, max_value=120000, value=int(env.get("VIDEO_UPLOAD_FALLBACK_WAIT_MS", "90000") or "90000"), step=10000)
+    st.caption(f"영상 fallback 대기: {ms_caption(video_upload_fallback_wait_ms)}")
     auto_resume_recoverable_errors = st.toggle(
         "버튼/업로드 오류 자동 이어가기",
         value=env_bool(env, "AUTO_RESUME_RECOVERABLE_ERRORS", "true"),
         help="광고 편집 중 다음/계속/완료/업로드/영상 처리 타임아웃처럼 이어가기 가능한 오류가 나면 현재 광고명부터 자동 재실행합니다.",
     )
     auto_resume_max_attempts = st.number_input("자동 이어가기 최대 횟수", min_value=0, max_value=10, value=int(env.get("AUTO_RESUME_MAX_ATTEMPTS", "3") or "3"))
-    auto_resume_wait_ms = st.number_input("자동 이어가기 전 대기(ms)", min_value=3000, max_value=60000, value=int(env.get("AUTO_RESUME_WAIT_MS", "10000") or "10000"), step=1000)
-    mode_01_wait_ms = st.number_input("mode_01_wait BLOG_MIXED(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_01_WAIT_MS", "10000") or "10000"), step=1000)
-    mode_02_wait_ms = st.number_input("mode_02_wait IMAGE_ONLY(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_02_WAIT_MS", "5000") or "5000"), step=1000)
-    mode_03_wait_ms = st.number_input("mode_03_wait VIDEO_ONLY_CBO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_03_WAIT_MS", "12000") or "12000"), step=1000)
-    mode_04_wait_ms = st.number_input("mode_04_wait IMAGE_ONLY_CBO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_04_WAIT_MS", "6000") or "6000"), step=1000)
-    mode_blog_video_wait_ms = st.number_input("mode_blog_video_wait BLOG_VIDEO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_BLOG_VIDEO_WAIT_MS", "12000") or "12000"), step=1000)
+    with st.expander("모드별 내부 대기값 보기", expanded=False):
+        st.caption(
+            f"BLOG_MIXED {ms_caption(mode_01_wait_ms)} / "
+            f"IMAGE_ONLY {ms_caption(mode_02_wait_ms)} / "
+            f"VIDEO_ONLY_CBO {ms_caption(mode_03_wait_ms)} / "
+            f"IMAGE_ONLY_CBO {ms_caption(mode_04_wait_ms)} / "
+            f"BLOG_VIDEO {ms_caption(mode_blog_video_wait_ms)}"
+        )
 
 with st.expander("실패 지점부터 재실행", expanded=False):
-    st.caption("광고명 변경/소재 업로드 중 중단된 경우, 실패한 광고 번호 또는 광고명을 넣고 다시 실행하면 해당 광고부터 이어서 처리합니다.")
+    st.caption("광고명 변경/소재 업로드 중 중단된 경우, 실패한 광고세트 번호와 그 안의 광고 번호를 지정하면 해당 광고세트를 먼저 찾아 들어간 뒤 이어서 처리합니다.")
     latest_resume = latest_failed_resume_point()
     if latest_resume:
         st.write(
@@ -626,19 +654,38 @@ with st.expander("실패 지점부터 재실행", expanded=False):
         help="신규 실행이면 반드시 꺼두세요. 켜져 있을 때만 RESUME_FROM_AD_INDEX/NAME이 .env에 저장됩니다.",
     )
     st.session_state.resume_mode_enabled = resume_mode_enabled
-    resume_from_ad_index_input = st.number_input(
-        "Resume from ad index",
-        min_value=1,
-        max_value=1000,
-        value=int(env.get("RESUME_FROM_AD_INDEX", "1") or "1"),
-        disabled=not resume_mode_enabled,
-        help="예: f_i_o_l_0522_2에서 실패했다면 2를 입력합니다. 1이면 처음부터 진행합니다.",
-    )
+    creatives_per_adset_for_resume = actual_creatives_per_adset(env)
+    saved_resume_index = max(1, int(env.get("RESUME_FROM_AD_INDEX", "1") or "1"))
+    default_resume_adset = ((saved_resume_index - 1) // creatives_per_adset_for_resume) + 1
+    default_resume_local_ad = ((saved_resume_index - 1) % creatives_per_adset_for_resume) + 1
+    resume_col1, resume_col2, resume_col3 = st.columns(3)
+    with resume_col1:
+        resume_from_adset_input = st.number_input(
+            "실패한 광고세트 번호",
+            min_value=1,
+            max_value=100,
+            value=default_resume_adset,
+            disabled=not resume_mode_enabled,
+            help="예: 3번 광고세트에서 멈췄다면 3을 입력합니다.",
+        )
+    with resume_col2:
+        resume_from_local_ad_input = st.number_input(
+            "광고세트 안 광고 번호",
+            min_value=1,
+            max_value=200,
+            value=default_resume_local_ad,
+            disabled=not resume_mode_enabled,
+            help="예: 그 광고세트 안의 4번째 광고에서 멈췄다면 4를 입력합니다.",
+        )
+    resume_from_ad_index_input = ((resume_from_adset_input - 1) * creatives_per_adset_for_resume) + resume_from_local_ad_input
+    with resume_col3:
+        st.metric("실제 resume ad index", resume_from_ad_index_input)
+        st.caption(f"현재 기준: 광고세트당 실제 광고 {creatives_per_adset_for_resume}개")
     resume_from_ad_name_input = st.text_input(
-        "Resume from ad name",
+        "실패한 광고명",
         value=env.get("RESUME_FROM_AD_NAME", ""),
         disabled=not resume_mode_enabled,
-        help="광고명이 명확하면 입력하세요. 예: f_i_o_l_0522_2. 인덱스보다 광고명 매칭을 우선 보조로 사용합니다.",
+        help="알림에 나온 광고명을 그대로 넣으면 더 정확합니다. 예: f_i_o_l_0522_2",
     )
     resume_from_ad_index = resume_from_ad_index_input if resume_mode_enabled else 1
     resume_from_ad_name = resume_from_ad_name_input if resume_mode_enabled else ""
