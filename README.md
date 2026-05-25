@@ -39,11 +39,28 @@ npx playwright show-trace logs\trace-YYYY-MM-DDT00-00-00-000Z.zip
 - `WAIT_EXTENDED_RETRY_INTERVAL_MS`
 - `VIDEO_UPLOAD_TIMEOUT_MS`
 - `VIDEO_UPLOAD_FALLBACK_WAIT_MS`
+- `AUTO_RESUME_RECOVERABLE_ERRORS`
+- `AUTO_RESUME_MAX_ATTEMPTS`
+- `AUTO_RESUME_WAIT_MS`
 - `MODE_01_WAIT_MS`
 - `MODE_02_WAIT_MS`
 - `MODE_03_WAIT_MS`
 - `MODE_04_WAIT_MS`
 - `MODE_BLOG_VIDEO_WAIT_MS`
+
+## 자동 이어가기
+
+광고 편집 중 `다음`, `계속`, `완료`, `업로드` 버튼 탐색 실패나 영상 업로드 확인 지연처럼 이어가기 가능한 오류가 나면, 현재 처리 중이던 광고명과 광고 인덱스를 기준으로 자동 resume을 시도합니다.
+
+기본값:
+
+```text
+AUTO_RESUME_RECOVERABLE_ERRORS=true
+AUTO_RESUME_MAX_ATTEMPTS=3
+AUTO_RESUME_WAIT_MS=10000
+```
+
+검증 실패, 소재 파일 누락, 캠페인/광고세트 안전 한도, 예산 입력 실패처럼 사람이 확인해야 하는 오류는 자동으로 이어가지 않고 즉시 중단합니다.
 
 현재 프로그램은 여러 캠페인 모드를 지원합니다.
 

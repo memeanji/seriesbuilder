@@ -90,6 +90,9 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
         f"WAIT_EXTENDED_RETRY_INTERVAL_MS={values.get('WAIT_EXTENDED_RETRY_INTERVAL_MS', '7000')}",
         f"VIDEO_UPLOAD_TIMEOUT_MS={values.get('VIDEO_UPLOAD_TIMEOUT_MS', '180000')}",
         f"VIDEO_UPLOAD_FALLBACK_WAIT_MS={values.get('VIDEO_UPLOAD_FALLBACK_WAIT_MS', '90000')}",
+        f"AUTO_RESUME_RECOVERABLE_ERRORS={values.get('AUTO_RESUME_RECOVERABLE_ERRORS', 'true')}",
+        f"AUTO_RESUME_MAX_ATTEMPTS={values.get('AUTO_RESUME_MAX_ATTEMPTS', '3')}",
+        f"AUTO_RESUME_WAIT_MS={values.get('AUTO_RESUME_WAIT_MS', '10000')}",
         f"MODE_01_WAIT_MS={values.get('MODE_01_WAIT_MS', '10000')}",
         f"MODE_02_WAIT_MS={values.get('MODE_02_WAIT_MS', '5000')}",
         f"MODE_03_WAIT_MS={values.get('MODE_03_WAIT_MS', '12000')}",
@@ -584,6 +587,13 @@ with st.expander("공통 wait/retry 설정", expanded=False):
     wait_extended_retry_interval = st.number_input("확장 재시도 간격(ms)", min_value=1000, max_value=30000, value=int(env.get("WAIT_EXTENDED_RETRY_INTERVAL_MS", "7000") or "7000"), step=1000)
     video_upload_timeout_ms = st.number_input("영상 업로드 확인 timeout(ms)", min_value=30000, max_value=300000, value=int(env.get("VIDEO_UPLOAD_TIMEOUT_MS", "180000") or "180000"), step=10000)
     video_upload_fallback_wait_ms = st.number_input("영상 fallback 대기(ms)", min_value=30000, max_value=120000, value=int(env.get("VIDEO_UPLOAD_FALLBACK_WAIT_MS", "90000") or "90000"), step=10000)
+    auto_resume_recoverable_errors = st.toggle(
+        "버튼/업로드 오류 자동 이어가기",
+        value=env_bool(env, "AUTO_RESUME_RECOVERABLE_ERRORS", "true"),
+        help="광고 편집 중 다음/계속/완료/업로드/영상 처리 타임아웃처럼 이어가기 가능한 오류가 나면 현재 광고명부터 자동 재실행합니다.",
+    )
+    auto_resume_max_attempts = st.number_input("자동 이어가기 최대 횟수", min_value=0, max_value=10, value=int(env.get("AUTO_RESUME_MAX_ATTEMPTS", "3") or "3"))
+    auto_resume_wait_ms = st.number_input("자동 이어가기 전 대기(ms)", min_value=3000, max_value=60000, value=int(env.get("AUTO_RESUME_WAIT_MS", "10000") or "10000"), step=1000)
     mode_01_wait_ms = st.number_input("mode_01_wait BLOG_MIXED(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_01_WAIT_MS", "10000") or "10000"), step=1000)
     mode_02_wait_ms = st.number_input("mode_02_wait IMAGE_ONLY(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_02_WAIT_MS", "5000") or "5000"), step=1000)
     mode_03_wait_ms = st.number_input("mode_03_wait VIDEO_ONLY_CBO(ms)", min_value=1000, max_value=30000, value=int(env.get("MODE_03_WAIT_MS", "12000") or "12000"), step=1000)
@@ -807,6 +817,9 @@ next_env: dict[str, str] = {
     "WAIT_EXTENDED_RETRY_INTERVAL_MS": str(wait_extended_retry_interval),
     "VIDEO_UPLOAD_TIMEOUT_MS": str(video_upload_timeout_ms),
     "VIDEO_UPLOAD_FALLBACK_WAIT_MS": str(video_upload_fallback_wait_ms),
+    "AUTO_RESUME_RECOVERABLE_ERRORS": str(auto_resume_recoverable_errors).lower(),
+    "AUTO_RESUME_MAX_ATTEMPTS": str(auto_resume_max_attempts),
+    "AUTO_RESUME_WAIT_MS": str(auto_resume_wait_ms),
     "MODE_01_WAIT_MS": str(mode_01_wait_ms),
     "MODE_02_WAIT_MS": str(mode_02_wait_ms),
     "MODE_03_WAIT_MS": str(mode_03_wait_ms),
@@ -821,6 +834,8 @@ with st.expander("Notification preview", expanded=False):
     st.write(f"- 에러 알림: {'ON' if notify_on_error else 'OFF'}")
     st.write(f"- 검증/중단 알림: {'ON' if notify_on_stop else 'OFF'}")
     st.write(f"- 영상 업로드 타임아웃 알림: {'ON' if notify_on_video_upload_timeout else 'OFF'}")
+    st.write(f"- 버튼/업로드 오류 자동 이어가기: {'ON' if auto_resume_recoverable_errors else 'OFF'}")
+    st.write(f"- 자동 이어가기 최대 횟수: {auto_resume_max_attempts}")
 
 if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT"}:
     is_blog_video = campaign_mode in {"BLOG_VIDEO", "BLOG_VIDEO_DIRECT"}

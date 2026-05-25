@@ -49,8 +49,17 @@ const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222';
 const QUICK_TEST_CREATIVE_STEP = String(process.env.QUICK_TEST_CREATIVE_STEP || '').toLowerCase() === 'true';
 const ENABLE_SCREENSHOTS = parseBoolean(process.env.ENABLE_SCREENSHOTS);
 const QUICK_TEST_AD_NAME = process.env.QUICK_TEST_AD_NAME || getAdName(1);
-const RESUME_FROM_AD_NAME = String(process.env.RESUME_FROM_AD_NAME || '').trim();
-const RESUME_FROM_AD_INDEX = Number(process.env.RESUME_FROM_AD_INDEX || 1);
+const INITIAL_RESUME_FROM_AD_NAME = String(process.env.RESUME_FROM_AD_NAME || '').trim();
+const INITIAL_RESUME_FROM_AD_INDEX = Number(process.env.RESUME_FROM_AD_INDEX || 1);
+let runtimeResumeFromAdName = INITIAL_RESUME_FROM_AD_NAME;
+let runtimeResumeFromAdIndex = INITIAL_RESUME_FROM_AD_INDEX;
+const AUTO_RESUME_RECOVERABLE_ERRORS = String(process.env.AUTO_RESUME_RECOVERABLE_ERRORS || 'true').trim().toLowerCase() !== 'false';
+const AUTO_RESUME_MAX_ATTEMPTS = Number.isFinite(Number(process.env.AUTO_RESUME_MAX_ATTEMPTS))
+  ? Number(process.env.AUTO_RESUME_MAX_ATTEMPTS)
+  : 3;
+const AUTO_RESUME_WAIT_MS = Number.isFinite(Number(process.env.AUTO_RESUME_WAIT_MS))
+  ? Number(process.env.AUTO_RESUME_WAIT_MS)
+  : 10_000;
 const WAIT_CONFIG = {
   baseRetryCount: Number(process.env.WAIT_BASE_RETRY_COUNT || 5),
   baseRetryIntervalMs: Number(process.env.WAIT_BASE_RETRY_INTERVAL_MS || 1500),
@@ -208,27 +217,74 @@ function getPlanAdCount() {
   return adsets * adsPerAdset;
 }
 
+function getEffectiveResumeAdName() {
+  return String(runtimeResumeFromAdName || '').trim();
+}
+
+function getEffectiveResumeAdIndex() {
+  return Number(runtimeResumeFromAdIndex || 1);
+}
+
 function getResumeAdCreativeStartIndex(plan = activeCampaignPlan) {
-  if (!RESUME_FROM_AD_NAME) {
-    if (Number.isFinite(RESUME_FROM_AD_INDEX) && RESUME_FROM_AD_INDEX > 1) {
-      return Math.floor(RESUME_FROM_AD_INDEX);
+  const resumeAdName = getEffectiveResumeAdName();
+  const resumeAdIndex = getEffectiveResumeAdIndex();
+  if (!resumeAdName) {
+    if (Number.isFinite(resumeAdIndex) && resumeAdIndex > 1) {
+      return Math.floor(resumeAdIndex);
     }
     return 1;
   }
-  const normalizedTarget = normalizeText(RESUME_FROM_AD_NAME);
+  const normalizedTarget = normalizeText(resumeAdName);
   const plannedAds = (plan?.adsets || []).flatMap((adset) => adset.ads || []);
   const plannedIndex = plannedAds.findIndex((ad) => normalizeText(ad.name || '') === normalizedTarget);
   if (plannedIndex >= 0) return plannedIndex + 1;
-  const trailingIndex = RESUME_FROM_AD_NAME.match(/_(\d+)$/)?.[1];
+  const trailingIndex = resumeAdName.match(/_(\d+)$/)?.[1];
   if (trailingIndex) return Number(trailingIndex);
-  if (Number.isFinite(RESUME_FROM_AD_INDEX) && RESUME_FROM_AD_INDEX > 1) {
-    return Math.floor(RESUME_FROM_AD_INDEX);
+  if (Number.isFinite(resumeAdIndex) && resumeAdIndex > 1) {
+    return Math.floor(resumeAdIndex);
   }
   return 1;
 }
 
 function isResumeModeEnabled() {
   return getResumeAdCreativeStartIndex() > 1;
+}
+
+function isRecoverableAutomationError(error) {
+  const message = String(error?.message || error || '').replace(/\x1b\[[0-9;]*m/g, '');
+  const currentStep = String(runContext.current_step || '');
+  const hasResumePoint = Boolean(runContext.current_ad_name) && Number(runContext.current_ad_index) > 0;
+  if (!hasResumePoint) return false;
+  if (/validate_config|campaign_create|duplicate_adsets|duplicate_ads|fill_adset_budget|schedule_adset/i.test(currentStep)) return false;
+  if (/requires exactly|must be|asset root does not exist|file not found|Video file not found|Image file not found|CAMPAIGN_NAME|안전 제한|검증/i.test(message)) {
+    return false;
+  }
+  return /Timeout|timed out|찾지 못했습니다|Could not find|button not found|not visible|upload completion|upload timeout|업로드|intercepts pointer events|Next button|Done button|Continue button|다음|계속|완료|업로드/i.test(message);
+}
+
+function activateRuntimeResumeFromContext(error, attempt) {
+  const resumeIndex = Number(runContext.current_ad_index || 1);
+  const resumeName = String(runContext.current_ad_name || '').trim();
+  if (!resumeName || !Number.isFinite(resumeIndex) || resumeIndex < 1) return false;
+  const previousStep = runContext.current_step;
+
+  runtimeResumeFromAdIndex = resumeIndex;
+  runtimeResumeFromAdName = resumeName;
+  updateRunContext({
+    current_step: 'auto_resume_prepare',
+    auto_resume_attempt: attempt,
+    auto_resume_from_ad_index: resumeIndex,
+    auto_resume_from_ad_name: resumeName,
+    last_recoverable_error: String(error?.message || error || '').slice(0, 1000),
+  });
+  console.log('[AUTO-RESUME] recoverable error detected - will resume from current ad:', {
+    attempt,
+    resumeIndex,
+    resumeName,
+    previousStep,
+    error: error?.message || String(error),
+  });
+  return true;
 }
 
 function getPlanAdsetForCreativeIndex(creativeIndex, plan = activeCampaignPlan) {
@@ -4084,8 +4140,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
   if (adCreativeIndex > 1) {
     console.log('[STEP] resume mode enabled - starting ad rename from creative index:', {
       adCreativeIndex,
-      RESUME_FROM_AD_INDEX,
-      RESUME_FROM_AD_NAME,
+      RESUME_FROM_AD_INDEX: getEffectiveResumeAdIndex(),
+      RESUME_FROM_AD_NAME: getEffectiveResumeAdName(),
     });
   }
   const effectiveAdsetCount = adsetCount + 1;
@@ -4456,7 +4512,8 @@ async function runFlow(page) {
   console.log('[DEBUG] TITLE:', await page.title());
   await safeScreenshot(page, PATHS.step2, 'page screenshot');
 
-  if (isCboCampaign()) {
+  const resumeMode = isResumeModeEnabled();
+  if (isCboCampaign() && !resumeMode) {
     updateRunContext({ current_step: 'cbo_campaign_create' });
     console.log(`[STEP] ${CAMPAIGN_MODE} campaign creation mode`);
     await timedStep('click_create_campaign', CAMPAIGN_NAME, () => clickRealCreateButton(page));
@@ -4468,6 +4525,9 @@ async function runFlow(page) {
     await timedStep('fill_campaign_budget', activeCampaignPlan.campaignName, () => fillCampaignBudget(page, activeCampaignPlan.rawCampaignBudget));
     await safeScreenshot(page, path.join(DIRS.screenshots, 'cbo-campaign-name-budget-filled.png'), 'cbo campaign name budget filled');
   } else {
+    if (isCboCampaign() && resumeMode) {
+      console.log('[STEP] CBO resume mode - opening existing campaign instead of creating a new campaign');
+    }
     await timedStep('search_campaign', CAMPAIGN_NAME, () => trySearchBox(page, CAMPAIGN_NAME));
     const campaignTarget = await timedStep('find_campaign', CAMPAIGN_NAME, () => findCampaignTarget(page, CAMPAIGN_NAME));
     if (!campaignTarget) {
@@ -4492,8 +4552,8 @@ async function runFlow(page) {
       : ((isVideoOnlyCampaign() || isCboCampaign()) ? Math.max((activeCampaignPlan?.adsetCount || ADSET_COUNT + 1) - 1, 0) : Math.max(ADSET_COUNT, 0));
     console.log('[STEP] resume mode - skipping create/schedule/duplicate steps and resuming ad edit:', {
       resumeStartIndex,
-      RESUME_FROM_AD_INDEX,
-      RESUME_FROM_AD_NAME,
+      RESUME_FROM_AD_INDEX: getEffectiveResumeAdIndex(),
+      RESUME_FROM_AD_NAME: getEffectiveResumeAdName(),
       targetAdsetName: resumeTargetAdset?.name || '',
       targetAdsetIndex: resumeTargetAdset?.index || '',
       adCreativeDuplicateCount,
@@ -4508,7 +4568,7 @@ async function runFlow(page) {
       await timedStep('resume_select_adset', resumeTargetAdset.name, () => selectExistingAdsetRowByName(page, resumeTargetAdset.name));
     }
     updateRunContext({ current_step: 'resume_rename_ads_and_upload_media' });
-    await timedStep('resume_rename_ads_and_upload_media', RESUME_FROM_AD_NAME || `ad_${resumeStartIndex}`, () => renameAdsetsAndAdsSequentially(page, (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount, { resumeOnly: true }));
+    await timedStep('resume_rename_ads_and_upload_media', getEffectiveResumeAdName() || `ad_${resumeStartIndex}`, () => renameAdsetsAndAdsSequentially(page, (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount, { resumeOnly: true }));
     updateRunContext({ current_step: 'success' });
     return;
   }
@@ -4582,6 +4642,38 @@ async function runFlow(page) {
 
   updateRunContext({ current_step: 'success' });
 
+}
+
+async function runFlowWithAutoResume(page) {
+  const maxAttempts = AUTO_RESUME_RECOVERABLE_ERRORS ? Math.max(AUTO_RESUME_MAX_ATTEMPTS, 0) : 0;
+  for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
+    try {
+      if (attempt > 0) {
+        console.log('[AUTO-RESUME] restarting flow from saved ad point:', {
+          attempt,
+          maxAttempts,
+          resumeAdIndex: getEffectiveResumeAdIndex(),
+          resumeAdName: getEffectiveResumeAdName(),
+          waitMs: AUTO_RESUME_WAIT_MS,
+        });
+        updateRunContext({ current_step: 'auto_resume_restart', auto_resume_attempt: attempt });
+        await page.waitForTimeout(AUTO_RESUME_WAIT_MS);
+      }
+      await runFlow(page);
+      return;
+    } catch (error) {
+      const canRetry = attempt < maxAttempts && isRecoverableAutomationError(error);
+      if (!canRetry || !activateRuntimeResumeFromContext(error, attempt + 1)) {
+        throw error;
+      }
+      console.warn('[AUTO-RESUME] recoverable run failed; retrying from failed ad instead of stopping:', {
+        attempt: attempt + 1,
+        maxAttempts,
+        resumeAdIndex: getEffectiveResumeAdIndex(),
+        resumeAdName: getEffectiveResumeAdName(),
+      });
+    }
+  }
 }
 
 async function main() {
@@ -4662,7 +4754,7 @@ async function main() {
       traceStarted = true;
       console.log('[TRACE] playwright tracing started:', tracePath);
     }).catch((error) => console.warn('[WARN] trace start failed:', error.message));
-    await timedStep('run_flow', CAMPAIGN_NAME, () => runFlow(page));
+    await timedStep('run_flow', CAMPAIGN_NAME, () => runFlowWithAutoResume(page));
 
     summaryLogPath = await writeRunSummaryLog('success');
     await notifySuccess(
