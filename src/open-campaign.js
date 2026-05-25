@@ -594,7 +594,8 @@ function getLandingPathNumber() {
 }
 
 function buildRepurelyLandingUrl(adName) {
-  return `https://repurely.com/surl/P/${getLandingPathNumber()}?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(adName)}`;
+  const baseUrl = String(process.env.REPURELY_BASE_URL || 'https://repurely.com/surl/P').replace(/\/$/, '');
+  return `${baseUrl}/${getLandingPathNumber()}?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(adName)}`;
 }
 
 function parseScheduleTime(value) {

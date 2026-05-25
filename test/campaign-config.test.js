@@ -4,6 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  buildAdsetPreview,
+  getAdMediaType,
+  renderTemplate,
+  validateCampaignModel,
+} from '../src/campaign-model.js';
+import {
   CAMPAIGN_MODES,
   buildBlogAdsetName,
   buildBlogImageAdName,
@@ -28,6 +34,66 @@ import {
 } from '../src/campaign-config.js';
 
 const fixedDate = new Date('2026-05-19T16:00:00.000Z'); // 2026-05-20 in Asia/Seoul
+
+test('renderTemplate replaces naming tokens and rejects unknown tokens', () => {
+  assert.equal(renderTemplate('f_i_o_l_{MMDD}_{idx}', { MMDD: '0520', idx: 1 }), 'f_i_o_l_0520_1');
+  assert.throws(() => renderTemplate('x_{missing}', {}), /Unknown template variable/);
+});
+
+test('campaign model mixed media puts only the final ad as video', () => {
+  const adset = { mediaType: 'mixed', adCount: 5 };
+  assert.equal(getAdMediaType(adset, 1), 'image');
+  assert.equal(getAdMediaType(adset, 4), 'image');
+  assert.equal(getAdMediaType(adset, 5), 'video');
+});
+
+test('campaign model validates mixed and URL modes', () => {
+  const base = {
+    adAccountId: '123',
+    dailyBudget: 100000,
+    scheduleTime: '05:00',
+    dryRun: true,
+    createNewCampaign: false,
+    namingTemplate: { adset: 'f_i_o_l_{MMDD}_{idx}', ad: '{adset_name}_{ad_idx}' },
+    repurelyBaseUrl: 'https://repurely.com/surl/P',
+    adsets: [{
+      index: 1,
+      mediaType: 'mixed',
+      adCount: 1,
+      imageFolder: './images',
+      videoFolder: './videos',
+      urlMode: 'per_ad_auto',
+      pathNumbers: [100],
+    }],
+  };
+  assert.match(validateCampaignModel(base).join('\n'), /mixed adCount must be >= 2/);
+  assert.match(validateCampaignModel({
+    ...base,
+    adsets: [{ ...base.adsets[0], adCount: 3, pathNumbers: [100] }],
+  }).join('\n'), /pathNumbers length must match adCount/);
+  assert.match(validateCampaignModel({
+    ...base,
+    adsets: [{ ...base.adsets[0], adCount: 3, urlMode: 'shared_manual', sharedLandingUrl: '' }],
+  }).join('\n'), /sharedLandingUrl is required/);
+});
+
+test('campaign model preview builds shared manual URLs without UTM', () => {
+  const config = {
+    namingTemplate: { adset: 'f_i_o_l_{MMDD}_{idx}', ad: '{adset_name}_{ad_idx}' },
+    repurelyBaseUrl: 'https://repurely.com/surl/P',
+  };
+  const preview = buildAdsetPreview(config, {
+    index: 1,
+    mediaType: 'mixed',
+    adCount: 3,
+    urlMode: 'shared_manual',
+    sharedLandingUrl: 'https://blog.naver.com/seriesbuilder/123',
+  }, fixedDate);
+  assert.equal(preview.adsetName, 'f_i_o_l_0520_1');
+  assert.equal(preview.ads[0].mediaType, 'image');
+  assert.equal(preview.ads[2].mediaType, 'video');
+  assert.equal(preview.ads[2].url, 'https://blog.naver.com/seriesbuilder/123');
+});
 
 async function createBlogAssets(root, adsetCount = 5, imageCount = 4, includeVideo = true) {
   for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {

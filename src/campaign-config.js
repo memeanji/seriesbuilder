@@ -79,6 +79,35 @@ export function getTodayString({
   throw new Error(`Unsupported DATE_FORMAT: ${dateFormat}. Use MMDD or YYYYMMDD.`);
 }
 
+function renderNameTemplate(template, vars) {
+  return String(template || '').replace(/\{(\w+)\}/g, (_, key) => {
+    if (key === 'mmdd') return vars.MMDD;
+    if (key === 'date') return vars.MMDD;
+    if (key === 'index') return vars.idx;
+    if (!(key in vars)) {
+      throw new Error(`Unknown template variable: {${key}}`);
+    }
+    return String(vars[key]);
+  });
+}
+
+function dateTokensForTemplate(date, env = process.env) {
+  const mmdd = getTodayString({
+    date,
+    timezone: env.TIMEZONE || 'Asia/Seoul',
+    dateFormat: 'MMDD',
+  });
+  const yyyymmdd = getTodayString({
+    date,
+    timezone: env.TIMEZONE || 'Asia/Seoul',
+    dateFormat: 'YYYYMMDD',
+  });
+  return {
+    MMDD: mmdd,
+    YYMMDD: yyyymmdd.slice(2),
+  };
+}
+
 export function buildBlogAdsetName(adsetIndex, env = process.env, date = new Date()) {
   const prefix = env.BLOG_ADSET_NAME_PREFIX || (isBlogVideoMode(env.CAMPAIGN_MODE) ? 'f_v_b_o_l' : 'f_i_b_o_l');
   const today = getTodayString({
@@ -88,10 +117,11 @@ export function buildBlogAdsetName(adsetIndex, env = process.env, date = new Dat
   });
   const template = String(env.BLOG_ADSET_NAME_TEMPLATE || '').trim();
   if (template) {
-    return template
-      .replaceAll('{mmdd}', today)
-      .replaceAll('{date}', today)
-      .replaceAll('{index}', String(adsetIndex));
+    return renderNameTemplate(template, {
+      MMDD: today,
+      YYMMDD: getTodayString({ date, timezone: env.TIMEZONE || 'Asia/Seoul', dateFormat: 'YYYYMMDD' }).slice(2),
+      idx: adsetIndex,
+    });
   }
   return `${prefix}_${today}_${adsetIndex}`;
 }
@@ -192,7 +222,8 @@ function getLandingPathNumber(env = process.env) {
 }
 
 export function getVideoOnlyLandingUrl(adName, env = process.env) {
-  return `https://repurely.com/surl/P/${getLandingPathNumber(env)}?utm_source=f&utm_medium=f&utm_campaign=${adName}`;
+  const baseUrl = String(env.REPURELY_BASE_URL || 'https://repurely.com/surl/P').replace(/\/$/, '');
+  return `${baseUrl}/${getLandingPathNumber(env)}?utm_source=f&utm_medium=f&utm_campaign=${adName}`;
 }
 
 export function getVideoOnlyCboLandingUrl(adIndex, adName, env = process.env) {
@@ -588,6 +619,7 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
 
   const adsets = [];
   for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
+    const adsetName = buildBlogAdsetName(adsetIndex, env, date);
     const landingUrl = isBlogVideoDirect ? '' : getLandingUrlForAdset(adsetIndex, env);
     const imageAssets = await getImageAssetsForAdset(adsetIndex, env, { baseDir });
     const videoAssets = isBlogVideo
@@ -626,11 +658,20 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
     const adIndexBase = (adsetIndex - 1) * totalAdsPerAdset;
     for (let imageIndex = 1; imageIndex <= imageAdsPerAdset; imageIndex += 1) {
       const globalAdIndex = adIndexBase + imageIndex;
+      const defaultImageAdName = buildBlogImageAdName(globalAdIndex, env, date);
+      const imageAdName = env.NAMING_AD_TEMPLATE
+        ? renderNameTemplate(env.NAMING_AD_TEMPLATE, {
+          ...dateTokensForTemplate(date, env),
+          idx: adsetIndex,
+          ad_idx: imageIndex,
+          adset_name: adsetName,
+        })
+        : defaultImageAdName;
       ads.push({
         type: 'image',
         index: globalAdIndex,
         adsetLocalIndex: imageIndex,
-        name: buildBlogImageAdName(globalAdIndex, env, date),
+        name: imageAdName,
         assetPath: imageAssets[imageIndex - 1],
         landingUrl,
         creativePayload: buildImageCreativePayload({
@@ -643,7 +684,15 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
     for (let videoIndex = 1; videoIndex <= videoAdsPerAdset; videoIndex += 1) {
       const videoAdIndex = adIndexBase + imageAdsPerAdset + videoIndex;
       const currentVideoAsset = videoAssets[videoIndex - 1];
-      const videoAdName = buildBlogVideoAdName(videoAdIndex, env, date);
+      const defaultVideoAdName = buildBlogVideoAdName(videoAdIndex, env, date);
+      const videoAdName = env.NAMING_AD_TEMPLATE
+        ? renderNameTemplate(env.NAMING_AD_TEMPLATE, {
+          ...dateTokensForTemplate(date, env),
+          idx: adsetIndex,
+          ad_idx: imageAdsPerAdset + videoIndex,
+          adset_name: adsetName,
+        })
+        : defaultVideoAdName;
       const videoLandingUrl = isBlogVideoDirect ? getVideoOnlyLandingUrl(videoAdName, env) : landingUrl;
       ads.push({
         type: 'video',
@@ -662,7 +711,7 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
 
     adsets.push({
       index: adsetIndex,
-      name: buildBlogAdsetName(adsetIndex, env, date),
+      name: adsetName,
       landingUrl: isBlogVideoDirect ? '(auto per ad)' : landingUrl,
       imageAssets,
       videoAsset,

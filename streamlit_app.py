@@ -55,6 +55,74 @@ def actual_creatives_per_adset(values: dict[str, str]) -> int:
         return 5
 
 
+def date_tokens(date: datetime | None = None) -> dict[str, str]:
+    now = date or datetime.now()
+    return {"MMDD": now.strftime("%m%d"), "YYMMDD": now.strftime("%y%m%d")}
+
+
+def render_template(template: str, variables: dict[str, object]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key not in variables:
+            raise ValueError(f"Unknown template variable: {{{key}}}")
+        return str(variables[key])
+
+    return re.sub(r"\{(\w+)\}", replace, template or "")
+
+
+def ad_media_type(media_type: str, ad_idx: int, ad_count: int) -> str:
+    if media_type == "mixed":
+        return "video" if ad_idx == ad_count else "image"
+    return media_type
+
+
+def build_ad_url(url_mode: str, shared_url: str, path_numbers: list[int], ad_idx: int, ad_name: str, base_url: str) -> str:
+    if url_mode == "shared_manual":
+        return shared_url
+    path_num = path_numbers[ad_idx - 1]
+    return f"{base_url.rstrip('/')}/{path_num}?utm_source=f&utm_medium=f&utm_campaign={ad_name}"
+
+
+def split_path_numbers(value: str, ad_count: int, default_path: int) -> list[int]:
+    raw_items = [item.strip() for item in re.split(r"[,\s]+", value or "") if item.strip()]
+    numbers: list[int] = []
+    for item in raw_items:
+        if item.isdigit():
+            numbers.append(int(item))
+    if not numbers:
+        numbers = [default_path for _ in range(ad_count)]
+    if len(numbers) < ad_count:
+        numbers.extend([numbers[-1] for _ in range(ad_count - len(numbers))])
+    return numbers[:ad_count]
+
+
+def derive_legacy_mode(create_new: bool, structure: str, media_types: list[str], url_modes: list[str]) -> tuple[str, list[str]]:
+    warnings: list[str] = []
+    unique_media = set(media_types)
+    unique_url = set(url_modes)
+    if create_new and structure == "ABO":
+        warnings.append("신규 ABO 캠페인 생성은 현재 UI 모델만 준비되어 있고, 기존 Playwright 엔진은 기존 캠페인 append 흐름으로 실행됩니다.")
+    if create_new and structure == "CBO":
+        if unique_media == {"image"}:
+            return "IMAGE_ONLY_CBO", warnings
+        if unique_media == {"video"}:
+            return "VIDEO_ONLY_CBO", warnings
+        warnings.append("현재 기존 자동화 엔진은 CBO mixed 조합을 직접 지원하지 않아 BLOG_MIXED로 변환할 수 없습니다.")
+        return "BLOG_MIXED", warnings
+    if unique_media == {"mixed"}:
+        if "per_ad_auto" in unique_url:
+            warnings.append("mixed + 광고별 자동 URL은 기존 엔진에서 세트 공유 URL로만 처리됩니다. 블로그/수동 URL을 권장합니다.")
+        return "BLOG_MIXED", warnings
+    if unique_media == {"video"}:
+        return ("BLOG_VIDEO_DIRECT" if unique_url == {"per_ad_auto"} else "BLOG_VIDEO"), warnings
+    if unique_media == {"image"}:
+        if "shared_manual" in unique_url:
+            warnings.append("이미지 전용 + 세트 공유 URL은 기존 IMAGE_ONLY 엔진에서 아직 직접 지원하지 않습니다. 광고별 자동 URL을 권장합니다.")
+        return "IMAGE_ONLY", warnings
+    warnings.append("광고세트별 서로 다른 소재 타입은 기존 엔진에서 한 번에 실행할 수 없습니다. 동일 타입끼리 나눠 실행해 주세요.")
+    return "BLOG_MIXED", warnings
+
+
 def read_env(path: Path = ENV_PATH) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
@@ -87,6 +155,9 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
         f"RESUME_FROM_AD_NAME={values.get('RESUME_FROM_AD_NAME', '')}",
         f"SCHEDULE_TIME={values.get('SCHEDULE_TIME', '05:00')}",
         f"LANDING_PATH_NUMBER={values.get('LANDING_PATH_NUMBER', '100')}",
+        f"REPURELY_BASE_URL={values.get('REPURELY_BASE_URL', 'https://repurely.com/surl/P')}",
+        f"NAMING_ADSET_TEMPLATE={values.get('NAMING_ADSET_TEMPLATE', '')}",
+        f"NAMING_AD_TEMPLATE={values.get('NAMING_AD_TEMPLATE', '')}",
         "",
         f"ENABLE_DESKTOP_ALERT={values.get('ENABLE_DESKTOP_ALERT', NOTIFICATION_DEFAULTS['ENABLE_DESKTOP_ALERT'])}",
         f"NOTIFY_ON_SUCCESS={values.get('NOTIFY_ON_SUCCESS', NOTIFICATION_DEFAULTS['NOTIFY_ON_SUCCESS'])}",
@@ -795,45 +866,181 @@ with st.sidebar:
     )
 
 
-st.subheader("Campaign Settings")
+st.subheader("Campaign Builder")
+st.caption("Campaign mode를 직접 고르지 않고, 캠페인 생성 여부/구조/소재 타입/URL 방식을 조합하면 기존 자동화 모드로 변환됩니다.")
 
-left, right = st.columns(2)
-with left:
-    campaign_mode_options = ["BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT", "IMAGE_ONLY", "VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"]
-    current_campaign_mode = env.get("CAMPAIGN_MODE", "IMAGE_ONLY")
-    if current_campaign_mode not in campaign_mode_options:
-        current_campaign_mode = "IMAGE_ONLY"
-    campaign_mode = st.selectbox(
-        "Campaign mode",
-        campaign_mode_options,
-        index=campaign_mode_options.index(current_campaign_mode),
-    )
+base_col, structure_col = st.columns(2)
+with base_col:
     dry_run = st.toggle("DRY_RUN", value=env.get("DRY_RUN", "true").lower() == "true")
     ad_account_id = st.text_input("Ad account ID", value=env.get("AD_ACCOUNT_ID", DEFAULT_ACCOUNT_ID))
-    campaign_name = st.text_input("Campaign name", value=env.get("CAMPAIGN_NAME", ""))
-
-with right:
-    if campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
-        adset_count = 0
-        st.info("CBO campaign structure: 1 campaign / 1 adset. Choose only the ad count below.")
-    else:
-        adset_count_min = 1 if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT"} else 0
-        adset_count_default = max(adset_count_min, int(env.get("ADSET_COUNT", "3") or "3"))
-        adset_count_label = f"Adset count ({campaign_mode} actual adsets)" if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT"} else "Adset count"
-        if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT"}:
-            adset_count_help = "입력한 숫자 그대로 실제 광고세트 개수입니다. 광고세트 안의 소재 수는 Ad creative count에서 정합니다. BLOG_MIXED는 마지막 1개만 영상이고, BLOG_VIDEO/BLOG_VIDEO_DIRECT는 전부 영상입니다."
-        else:
-            adset_count_help = "기존 IMAGE_ONLY/VIDEO_ONLY 흐름에서는 입력값이 복제 기준으로 저장되어 실제 광고세트는 입력값 + 1개로 구성됩니다. 예: 0 입력 -> 1개, 2 입력 -> 3개."
-        adset_count = st.number_input(
-            adset_count_label,
-            min_value=adset_count_min,
-            max_value=100,
-            value=adset_count_default,
-            help=adset_count_help,
-        )
+    create_new_campaign = st.toggle(
+        "새 캠페인 생성",
+        value=env.get("CAMPAIGN_MODE", "IMAGE_ONLY") in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"},
+        help="끄면 기존 캠페인을 검색해서 그 안에 광고세트를 추가합니다.",
+    )
+    campaign_name = st.text_input(
+        "Campaign name",
+        value=env.get("CAMPAIGN_NAME", ""),
+        help="새 캠페인 생성 시 만들 캠페인명, 기존 캠페인 추가 시 검색할 캠페인명입니다.",
+    )
     daily_budget = st.text_input("Daily budget", value=env.get("ADSET_DAILY_BUDGET", "300000"))
     schedule_time = st.text_input("Schedule time", value=env.get("SCHEDULE_TIME", "05:00"))
     st.caption(f"Chrome CDP: `{profile_slot}` / `{cdp_url}`")
+
+with structure_col:
+    campaign_structure = "ABO"
+    campaign_budget = env.get("CAMPAIGN_BUDGET", "25000")
+    if create_new_campaign:
+        campaign_structure = st.radio("Campaign structure", ["CBO", "ABO"], horizontal=True, index=0 if env.get("CAMPAIGN_MODE") in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"} else 1)
+        if campaign_structure == "CBO":
+            campaign_budget = st.text_input("Campaign budget", value=campaign_budget)
+        else:
+            st.info("ABO 신규 캠페인 생성은 UI 모델에 준비되어 있지만 현재 Playwright 엔진은 기존 캠페인 append 흐름으로 실행됩니다.")
+    else:
+        st.info("기존 캠페인에 광고세트를 추가합니다. 캠페인 구조/캠페인 예산 입력은 숨깁니다.")
+
+with st.expander("Naming / URL templates", expanded=True):
+    template_col1, template_col2, template_col3 = st.columns(3)
+    with template_col1:
+        naming_adset_template = st.text_input("Adset template", value=env.get("BLOG_ADSET_NAME_TEMPLATE") or env.get("NAMING_ADSET_TEMPLATE", "f_i_o_l_{MMDD}_{idx}"))
+    with template_col2:
+        naming_ad_template = st.text_input("Ad template", value=env.get("NAMING_AD_TEMPLATE", "{adset_name}_{ad_idx}"))
+    with template_col3:
+        repurely_base_url = st.text_input("Repurely base URL", value=env.get("REPURELY_BASE_URL", "https://repurely.com/surl/P"))
+    st.caption("지원 토큰: `{MMDD}`, `{YYMMDD}`, `{idx}`, `{ad_idx}`, `{adset_name}`")
+
+default_mode = env.get("CAMPAIGN_MODE", "IMAGE_ONLY")
+default_media = "mixed" if default_mode == "BLOG_MIXED" else ("video" if default_mode in {"BLOG_VIDEO", "BLOG_VIDEO_DIRECT", "VIDEO_ONLY_CBO"} else "image")
+default_url_mode = "per_ad_auto" if default_mode in {"BLOG_VIDEO_DIRECT", "VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO", "IMAGE_ONLY", "VIDEO_ONLY"} else "shared_manual"
+default_actual_adsets = 1 if default_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"} else max(1, int(env.get("ADSET_COUNT", "1") or "1"))
+default_actual_ads = max(1, int(env.get("AD_CREATIVE_COUNT", "4") or "4") + 1)
+
+adset_count = st.number_input("Adset count", min_value=1, max_value=100, value=default_actual_adsets)
+adsets: list[dict[str, object]] = []
+preview_rows: list[dict[str, object]] = []
+ui_errors: list[str] = []
+ui_warnings: list[str] = []
+tokens = date_tokens()
+
+for adset_index in range(1, int(adset_count) + 1):
+    with st.expander(f"Adset #{adset_index}", expanded=adset_index == 1):
+        adset_key = f"unified_adset_{adset_index}"
+        header_col1, header_col2, header_col3 = st.columns(3)
+        with header_col1:
+            media_type = st.radio(
+                "소재 타입",
+                ["image", "video", "mixed"],
+                index=["image", "video", "mixed"].index(default_media),
+                horizontal=True,
+                key=f"{adset_key}_media",
+            )
+        with header_col2:
+            ad_count = st.number_input("광고 개수", min_value=1, max_value=100, value=default_actual_ads, key=f"{adset_key}_ad_count")
+        with header_col3:
+            url_mode = st.radio(
+                "URL 방식",
+                ["per_ad_auto", "shared_manual"],
+                format_func=lambda value: "광고별 자동" if value == "per_ad_auto" else "세트 공유",
+                index=["per_ad_auto", "shared_manual"].index(default_url_mode),
+                horizontal=True,
+                key=f"{adset_key}_url_mode",
+            )
+
+        folder_col1, folder_col2 = st.columns(2)
+        image_folder = ""
+        video_folder = ""
+        with folder_col1:
+            if media_type in {"image", "mixed"}:
+                image_folder = st.text_input("Image folder", value=env.get("IMAGE_ONLY_ASSET_ROOT") or env.get("MEDIA_FOLDER_PATH") or default_image_root(), key=f"{adset_key}_image_folder")
+        with folder_col2:
+            if media_type in {"video", "mixed"}:
+                video_folder = st.text_input("Video folder", value=env.get("VIDEO_ONLY_ASSET_ROOT") or env.get("BLOG_ASSET_ROOT") or default_video_root(), key=f"{adset_key}_video_folder")
+
+        default_path_number = int(env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")) or "100")
+        path_numbers: list[int] = []
+        shared_landing_url = ""
+        if url_mode == "per_ad_auto":
+            path_raw = st.text_input(
+                "Path numbers",
+                value=" ".join([str(default_path_number)] * int(ad_count)),
+                help="광고 개수만큼 입력합니다. 예: 100 101 102",
+                key=f"{adset_key}_paths",
+            )
+            path_numbers = split_path_numbers(path_raw, int(ad_count), default_path_number)
+        else:
+            shared_landing_url = st.text_area(
+                "Shared landing URL",
+                value=env.get(f"BLOG_LANDING_URL_{adset_index}", ""),
+                placeholder="블로그 URL을 입력하세요",
+                key=f"{adset_key}_shared_url",
+            ).strip()
+
+        try:
+            adset_name = render_template(naming_adset_template, {**tokens, "idx": adset_index})
+        except ValueError as exc:
+            adset_name = "(template error)"
+            ui_errors.append(str(exc))
+        st.caption(f"Adset name preview: `{adset_name}`")
+
+        if media_type == "mixed" and int(ad_count) < 2:
+            ui_errors.append(f"Adset {adset_index}: mixed는 광고 개수가 2개 이상이어야 합니다.")
+        if url_mode == "shared_manual" and not shared_landing_url:
+            ui_errors.append(f"Adset {adset_index}: 세트 공유 URL을 입력해 주세요.")
+        if url_mode == "per_ad_auto" and len(path_numbers) != int(ad_count):
+            ui_errors.append(f"Adset {adset_index}: path number 개수가 광고 개수와 같아야 합니다.")
+
+        for ad_idx in range(1, int(ad_count) + 1):
+            media_for_ad = ad_media_type(media_type, ad_idx, int(ad_count))
+            try:
+                ad_name = render_template(naming_ad_template, {**tokens, "idx": adset_index, "ad_idx": ad_idx, "adset_name": adset_name})
+                landing_url = build_ad_url(url_mode, shared_landing_url, path_numbers, ad_idx, ad_name, repurely_base_url)
+            except (ValueError, IndexError) as exc:
+                ad_name = "(template error)"
+                landing_url = "(url error)"
+                ui_errors.append(str(exc))
+            preview_rows.append({
+                "adset": adset_index,
+                "adset_name": adset_name,
+                "ad": ad_idx,
+                "media": media_for_ad,
+                "ad_name": ad_name,
+                "landing_url": landing_url,
+            })
+
+        adsets.append({
+            "index": adset_index,
+            "mediaType": media_type,
+            "adCount": int(ad_count),
+            "imageFolder": image_folder,
+            "videoFolder": video_folder,
+            "urlMode": url_mode,
+            "pathNumbers": path_numbers,
+            "sharedLandingUrl": shared_landing_url,
+        })
+
+media_types = [str(item["mediaType"]) for item in adsets]
+url_modes = [str(item["urlMode"]) for item in adsets]
+campaign_mode, mapping_warnings = derive_legacy_mode(create_new_campaign, campaign_structure, media_types, url_modes)
+ui_warnings.extend(mapping_warnings)
+
+ad_counts = {int(item["adCount"]) for item in adsets}
+if len(ad_counts) > 1:
+    ui_warnings.append("현재 Playwright 엔진은 한 실행 안에서 광고세트별 서로 다른 광고 개수를 지원하지 않습니다. 같은 광고 개수로 맞춰 주세요.")
+if create_new_campaign and campaign_structure == "CBO" and int(adset_count) != 1:
+    ui_warnings.append("현재 CBO 생성 자동화는 1개 캠페인 / 1개 광고세트 기준입니다. CBO는 광고세트 1개로 실행해 주세요.")
+if any(mode == "per_ad_auto" for mode in url_modes):
+    unique_paths = {path for item in adsets for path in item.get("pathNumbers", [])}
+    if len(unique_paths) > 1:
+        ui_warnings.append("기존 엔진은 실행 1회당 Repurely path number 1개를 사용합니다. path가 여러 개면 첫 번째 path로 저장됩니다.")
+
+first_adset = adsets[0]
+ad_count_for_env = int(first_adset["adCount"])
+first_path = str((first_adset.get("pathNumbers") or [env.get("LANDING_PATH_NUMBER", "100")])[0])
+adset_count_for_env = int(adset_count)
+if campaign_mode in {"IMAGE_ONLY", "VIDEO_ONLY"}:
+    adset_count_for_env = max(0, int(adset_count) - 1)
+elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
+    adset_count_for_env = 0
 
 next_env: dict[str, str] = {
     "AD_ACCOUNT_ID": ad_account_id,
@@ -841,14 +1048,17 @@ next_env: dict[str, str] = {
     "CAMPAIGN_MODE": campaign_mode,
     "DRY_RUN": str(dry_run).lower(),
     "ADSET_START_INDEX": "1",
-    "ADSET_COUNT": str(adset_count),
+    "ADSET_COUNT": str(adset_count_for_env),
     "ADSET_DAILY_BUDGET": daily_budget,
     "CDP_URL": cdp_url,
     "CHROME_PROFILE_DIR": chrome_profile_dir,
     "RESUME_FROM_AD_INDEX": str(resume_from_ad_index),
     "RESUME_FROM_AD_NAME": resume_from_ad_name,
     "SCHEDULE_TIME": schedule_time,
-    "LANDING_PATH_NUMBER": env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")),
+    "LANDING_PATH_NUMBER": first_path,
+    "REPURELY_BASE_URL": repurely_base_url,
+    "NAMING_ADSET_TEMPLATE": naming_adset_template,
+    "NAMING_AD_TEMPLATE": naming_ad_template,
     "ENABLE_DESKTOP_ALERT": str(enable_desktop_alert).lower(),
     "NOTIFY_ON_SUCCESS": str(notify_on_success).lower(),
     "NOTIFY_ON_ERROR": str(notify_on_error).lower(),
@@ -874,306 +1084,45 @@ next_env: dict[str, str] = {
     "MODE_BLOG_VIDEO_WAIT_MS": str(mode_blog_video_wait_ms),
 }
 
-with st.expander("Notification preview", expanded=False):
-    st.write("알림 설정:")
-    st.write(f"- 데스크톱 알림: {'ON' if enable_desktop_alert else 'OFF'}")
-    st.write(f"- 완료 알림: {'ON' if notify_on_success else 'OFF'}")
-    st.write(f"- 에러 알림: {'ON' if notify_on_error else 'OFF'}")
-    st.write(f"- 검증/중단 알림: {'ON' if notify_on_stop else 'OFF'}")
-    st.write(f"- 영상 업로드 타임아웃 알림: {'ON' if notify_on_video_upload_timeout else 'OFF'}")
-    st.write(f"- 버튼/업로드 오류 자동 이어가기: {'ON' if auto_resume_recoverable_errors else 'OFF'}")
-    st.write(f"- 자동 이어가기 최대 횟수: {auto_resume_max_attempts}")
+next_env["AD_CREATIVE_COUNT"] = str(max(0, ad_count_for_env - 1))
+next_env["CAMPAIGN_BUDGET"] = campaign_budget if campaign_structure == "CBO" else ""
 
 if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT"}:
-    is_blog_video = campaign_mode in {"BLOG_VIDEO", "BLOG_VIDEO_DIRECT"}
-    is_blog_video_direct = campaign_mode == "BLOG_VIDEO_DIRECT"
-    st.subheader(campaign_mode)
-    st.caption(
-        ("Blog video direct mode: every creative is video, and landing URLs are generated from f_v_o_l ad names."
-         if is_blog_video_direct
-         else "Blog video mode: every creative in each adset is video.")
-        if is_blog_video
-        else "Mixed blog mode: the final creative in each adset is video, and all previous creatives are images."
-    )
-    blog_creative_count = st.number_input(
-        "Ad creative count",
-        min_value=0 if is_blog_video else 1,
-        max_value=100,
-        value=max(0 if is_blog_video else 1, int(env.get("AD_CREATIVE_COUNT", "4") or "4")),
-        help=(
-            "광고 소재 복제 수입니다. 실제 매체 소재 수는 입력값 + 1개입니다. BLOG_VIDEO는 실제 소재가 모두 영상입니다. 예: 0 입력 -> 실제 영상 1개, 4 입력 -> 실제 영상 5개."
-            if is_blog_video
-            else "광고 소재 복제 수입니다. 실제 매체 소재 수는 입력값 + 1개입니다. 마지막 1개는 영상이고, 나머지는 이미지입니다. 예: 4 입력 -> 실제 5개, 이미지 4개 + 영상 1개."
-        ),
-    )
-    default_blog_adset_template = "f_v_b_o_l_{mmdd}_{index}" if is_blog_video else "f_i_b_o_l_{mmdd}_{index}"
-    blog_adset_name_template = st.text_input(
-        "Adset name template",
-        value=env.get("BLOG_ADSET_NAME_TEMPLATE", default_blog_adset_template),
-        help="광고세트명 템플릿입니다. {index}만 광고세트 번호로 바뀝니다. {mmdd}도 사용할 수 있습니다. 예: 블로그 랜딩 {index}번 세트",
-    )
-    blog_actual_creative_count = int(blog_creative_count) + 1
-    blog_image_count = 0 if is_blog_video else max(blog_actual_creative_count - 1, 1)
-    blog_video_count = blog_actual_creative_count if is_blog_video else 1
-    next_env["AD_CREATIVE_COUNT"] = str(blog_creative_count)
-    next_env["BLOG_ADSET_NAME_TEMPLATE"] = blog_adset_name_template
-    if is_blog_video_direct:
-        landing_path_number = st.number_input(
-            "Repurely path number",
-            min_value=1,
-            max_value=999999,
-            value=int(env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")) or "100"),
-            help="자동 랜딩 URL의 /surl/P/{숫자} 부분입니다. utm_campaign은 f_v_o_l_MMDD_index 광고명으로 들어갑니다.",
-        )
-        next_env["LANDING_PATH_NUMBER"] = str(landing_path_number)
-    else:
-        landing_path_number = int(next_env.get("LANDING_PATH_NUMBER", "100") or "100")
-    blog_root = st.text_input("Blog asset root", value=env.get("BLOG_ASSET_ROOT", default_blog_root()))
-    next_env["BLOG_ASSET_ROOT"] = blog_root
-    blog_video_files = list_video_files_for_preview(blog_root) if is_blog_video else []
-
-    with st.expander("Expected folder names", expanded=True):
-        if is_blog_video:
-            total_video_count = int(adset_count) * blog_video_count
-            st.write(f"`{blog_root}` 폴더 안의 영상 파일을 파일명 순서대로 읽습니다.")
-            st.write(f"필요 영상 수: `{total_video_count}`개 = 광고세트 `{adset_count}`개 x 세트당 영상 `{blog_video_count}`개")
-            st.write(f"현재 루트 폴더 영상 수: `{len(blog_video_files)}`개")
-            if blog_video_files:
-                st.caption("정렬 preview")
-                st.write(", ".join(blog_video_files[: min(10, len(blog_video_files))]))
-            for index in range(1, int(adset_count) + 1):
-                first = ((index - 1) * blog_video_count) + 1
-                last = index * blog_video_count
-                st.write(f"{index}. adset {index}: sorted video #{first} ~ #{last}")
-        else:
-            for index in range(1, int(adset_count) + 1):
-                st.write(f"{index}. `{expected_blog_folder_name(index, daily_budget, schedule_time, blog_image_count)}`")
-
-    st.subheader("Landing URLs")
-    if is_blog_video_direct:
-        st.caption("랜딩 URL은 직접 입력하지 않고 광고명 기준으로 자동 생성합니다.")
-    else:
-        st.caption("URL은 광고별이 아니라 광고세트 1개당 1개만 입력합니다. 해당 광고세트 안의 모든 소재에 같은 URL이 들어갑니다.")
-    blog_preview_rows = []
-    for index in range(1, int(adset_count) + 1):
-        key = f"BLOG_LANDING_URL_{index}"
-        if is_blog_video_direct:
-            landing_url = "(auto per ad)"
-            next_env[key] = ""
-        else:
-            landing_url = st.text_input(f"Adset {index} landing URL", value=env.get(key, ""))
-            next_env[key] = landing_url
-        first_ad_index = ((index - 1) * blog_actual_creative_count) + 1
-        image_names = [] if is_blog_video else [build_blog_image_ad_name(first_ad_index + offset) for offset in range(blog_image_count)]
-        video_name_builder = build_blog_video_direct_ad_name if is_blog_video_direct else build_blog_video_ad_name
-        video_names = [video_name_builder(first_ad_index + blog_image_count + offset) for offset in range(blog_video_count)]
-        auto_landing_examples = [default_landing_url(name, str(landing_path_number)) for name in video_names[:3]] if is_blog_video_direct else []
-        folder_name = (
-            expected_blog_video_folder_name(index, daily_budget, schedule_time, blog_video_count)
-            if is_blog_video
-            else expected_blog_folder_name(index, daily_budget, schedule_time, blog_image_count)
-        )
-        blog_preview_rows.append(
-            {
-                "adset_index": index,
-                "adset_name": build_blog_adset_name(index, video=is_blog_video, template=blog_adset_name_template),
-                "landing_url": landing_url or "(missing)",
-                "image_ads": ", ".join(image_names) if image_names else "-",
-                "video_ads": ", ".join(video_names),
-                "auto_landing_examples": " | ".join(auto_landing_examples) if auto_landing_examples else "-",
-                "expected_folder": folder_name,
-            }
-        )
-
-    with st.expander(f"{campaign_mode} preview / validation", expanded=True):
-        st.write(f"Campaign name: `{campaign_name or '(missing)'}`")
-        st.write(f"Adset count: `{adset_count}`")
-        st.write(f"Actual creatives per adset: `{blog_actual_creative_count}`")
-        st.write(f"Image creatives per adset: `{blog_image_count}`")
-        st.write(f"Video creatives per adset: `{blog_video_count}`")
-        st.write(f"Blog asset root: `{blog_root}`")
-        if is_blog_video:
-            required_videos = int(adset_count) * blog_video_count
-            if len(blog_video_files) >= required_videos:
-                st.success(f"Root folder videos ready: {len(blog_video_files)} / {required_videos}")
-            else:
-                st.error(f"Root folder videos missing: {len(blog_video_files)} / {required_videos}")
-        st.dataframe(blog_preview_rows, use_container_width=True)
-        missing_urls = [] if is_blog_video_direct else [row["adset_index"] for row in blog_preview_rows if row["landing_url"] == "(missing)"]
-        if missing_urls:
-            st.error(f"Landing URL missing for adset(s): {', '.join(map(str, missing_urls))}")
-        elif is_blog_video_direct:
-            mmdd = datetime.now().strftime("%m%d")
-            st.success("Landing URLs will be generated automatically from ad names.")
-            st.write(f"Example: `{default_landing_url(f'f_v_o_l_{mmdd}_1', str(landing_path_number))}`")
-        else:
-            st.success("All adset landing URLs are ready.")
-elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
-    is_image_cbo = campaign_mode == "IMAGE_ONLY_CBO"
-    mode_prefix = "IMAGE_ONLY_CBO" if is_image_cbo else "VIDEO_ONLY_CBO"
-    media_label = "Image" if is_image_cbo else "Video"
-    media_label_lower = "image" if is_image_cbo else "video"
-    folder_key = "IMAGE_ONLY_CBO_IMAGE_FOLDER" if is_image_cbo else "VIDEO_ONLY_CBO_VIDEO_FOLDER"
-    st.subheader(campaign_mode)
-    st.caption(f"{media_label}-only CBO campaign creation mode.")
-    campaign_budget = st.text_input("Campaign budget", value=env.get("CAMPAIGN_BUDGET", "25000"))
-    landing_path_number = st.number_input(
-        "Repurely path number",
-        min_value=1,
-        max_value=999999,
-        value=int(env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")) or "100"),
-        help="랜딩 URL의 /surl/P/{숫자} 부분입니다. 예: 99 입력 -> https://repurely.com/surl/P/99?...",
-    )
-    media_count = st.number_input(
-        f"{media_label} ad count",
-        min_value=1,
-        max_value=100,
-        value=int(env.get("AD_CREATIVE_COUNT", "0") or "0") + 1,
-        help=f"입력한 숫자 그대로 실제 {media_label_lower} 광고 개수입니다. CBO 모드는 광고세트 1개 고정이며, 저장 시 .env의 AD_CREATIVE_COUNT에는 입력값 - 1로 저장됩니다. 예: 5 입력 -> 실제 광고 5개, AD_CREATIVE_COUNT=4",
-    )
-    media_folder = st.text_input(f"{media_label} file folder", value=env.get(folder_key, "./assets/images" if is_image_cbo else "./assets/videos"))
-    next_env["CAMPAIGN_BUDGET"] = campaign_budget
-    next_env["LANDING_PATH_NUMBER"] = str(landing_path_number)
-    next_env["ADSET_COUNT"] = "0"
-    next_env["AD_CREATIVE_COUNT"] = str(int(media_count) - 1)
-    next_env[folder_key] = media_folder
-
-    adset_total = 1
-    creative_total = int(media_count)
-    total_ads = adset_total * creative_total
-    media_stems = list_image_stems_for_preview(media_folder) if is_image_cbo else list_video_stems_for_preview(media_folder)
-    st.info(f"Budget preview for Meta: {format_budget_preview(campaign_budget) or 'invalid budget'}")
-
-    preview_rows = []
-    missing_count = 0
-    st.subheader("Adset name")
-    adset_names: dict[int, str] = {}
-    for adset_index in range(1, adset_total + 1):
-        key = f"{mode_prefix}_ADSET_NAME_{adset_index}"
-        default_adset_name = build_image_only_cbo_adset_name(adset_index) if is_image_cbo else build_video_only_cbo_adset_name(adset_index)
-        adset_name = st.text_input(f"Adset {adset_index} name", value=env.get(key, default_adset_name), key=key)
-        next_env[key] = adset_name
-        adset_names[adset_index] = adset_name
-
-    st.subheader(f"Ads, {media_label_lower}s, and landing URL examples")
-    for ad_index in range(1, total_ads + 1):
-        adset_index = ((ad_index - 1) // creative_total) + 1
-        ad_name_key = f"{mode_prefix}_AD_NAME_{ad_index}"
-        default_builder = build_image_only_cbo_ad_name if is_image_cbo else build_video_only_cbo_ad_name
-        default_ad_name = env.get(ad_name_key) or (media_stems[ad_index - 1] if ad_index <= len(media_stems) else default_builder(ad_index))
-        ad_name = st.text_input(f"Ad {ad_index} name", value=default_ad_name, key=ad_name_key)
-        next_env[ad_name_key] = ad_name
-        media_file, expected = (find_image_file_for_preview(ad_name, media_folder) if is_image_cbo else find_video_file_for_preview(ad_name, media_folder))
-        landing_url_example = default_landing_url(ad_name, str(landing_path_number))
-        if not media_file:
-            missing_count += 1
-        preview_rows.append(
-            {
-                "adset": adset_names[adset_index],
-                "ad_name": ad_name,
-                f"{media_label_lower}_file": media_file or f"Missing: {', '.join(expected)}",
-                "landing_url_example": landing_url_example,
-            }
-        )
-
-    with st.expander(f"{campaign_mode} preview / validation", expanded=True):
-        st.write(f"Campaign name: `{campaign_name or '(missing)'}`")
-        st.write(f"Campaign budget: `{format_budget_preview(campaign_budget) or '(invalid)'}`")
-        st.write(f"{media_label} folder: `{media_folder}`")
-        st.write(f"Landing URL pattern: `{default_landing_url('{ad_name}', str(landing_path_number))}`")
-        st.dataframe(preview_rows, use_container_width=True)
-        if missing_count:
-            st.error(f"{missing_count} ad rows have a missing {media_label_lower} file.")
-        else:
-            st.success(f"All {media_label_lower} files are ready. Landing URLs will be generated automatically.")
+    next_env["BLOG_ASSET_ROOT"] = str(first_adset.get("videoFolder") or first_adset.get("imageFolder") or "")
+    next_env["BLOG_ADSET_NAME_TEMPLATE"] = naming_adset_template
+    next_env["DATE_FORMAT"] = "MMDD"
+    next_env["BLOG_IMAGE_AD_NAME_PREFIX"] = "f_i_b_o_l"
+    next_env["BLOG_VIDEO_AD_NAME_PREFIX"] = "f_v_o_l" if campaign_mode == "BLOG_VIDEO_DIRECT" else "f_v_b_o_l"
+    for item in adsets:
+        next_env[f"BLOG_LANDING_URL_{item['index']}"] = str(item.get("sharedLandingUrl") or "")
+elif campaign_mode == "IMAGE_ONLY":
+    next_env["IMAGE_ONLY_UPLOAD_MODE"] = "PER_AD"
+    next_env["IMAGE_ONLY_ASSET_ROOT"] = str(first_adset.get("imageFolder") or "")
+    next_env["MEDIA_FOLDER_PATH"] = str(first_adset.get("imageFolder") or "")
 elif campaign_mode == "VIDEO_ONLY":
-    st.subheader("VIDEO_ONLY")
-    st.caption("Video-only direct landing mode.")
-    landing_path_number = st.number_input(
-        "Repurely path number",
-        min_value=1,
-        max_value=999999,
-        value=int(env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")) or "100"),
-        help="랜딩 URL의 /surl/P/{숫자} 부분입니다. utm_campaign 값은 광고명으로 유지됩니다.",
-    )
-    video_count = st.number_input(
-        "Video ad count",
-        min_value=1,
-        max_value=100,
-        value=int(env.get("AD_CREATIVE_COUNT", "1") or "1"),
-        help="기존 VIDEO_ONLY 흐름에서는 이 값이 복제 기준으로 저장되어 실제 영상 광고는 입력값 + 1개로 구성됩니다. 예: 1 입력 -> 실제 2개.",
-    )
-    next_env["LANDING_PATH_NUMBER"] = str(landing_path_number)
-    video_root = st.text_input("Video asset root", value=env.get("VIDEO_ONLY_ASSET_ROOT", default_video_root()))
-    next_env["AD_CREATIVE_COUNT"] = str(video_count)
-    next_env["VIDEO_ONLY_ASSET_ROOT"] = video_root
+    next_env["VIDEO_ONLY_ASSET_ROOT"] = str(first_adset.get("videoFolder") or "")
+elif campaign_mode in {"VIDEO_ONLY_CBO", "IMAGE_ONLY_CBO"}:
+    mode_prefix = "VIDEO_ONLY_CBO" if campaign_mode == "VIDEO_ONLY_CBO" else "IMAGE_ONLY_CBO"
+    folder_key = "VIDEO_ONLY_CBO_VIDEO_FOLDER" if campaign_mode == "VIDEO_ONLY_CBO" else "IMAGE_ONLY_CBO_IMAGE_FOLDER"
+    next_env[folder_key] = str(first_adset.get("videoFolder") or first_adset.get("imageFolder") or "")
+    next_env[f"{mode_prefix}_AUTO_LANDING_URL"] = "true"
+    next_env[f"{mode_prefix}_ADSET_NAME_1"] = str(preview_rows[0]["adset_name"]) if preview_rows else ""
+    for row_number, row in enumerate(preview_rows, start=1):
+        next_env[f"{mode_prefix}_AD_NAME_{row_number}"] = str(row["ad_name"])
 
-    with st.expander("Expected folder names", expanded=True):
-        detected_folder_names = read_child_folder_names(str(Path(video_root).parent), 1)
-        matched = detected_folder_names
-        if matched:
-            st.caption("Detected from parent folder.")
-            st.write(f"1. `{matched[0]}`")
-        else:
-            st.caption("No matching folder detected yet. Showing recommended folder name.")
-            st.write(f"1. `{expected_video_folder_name()}`")
-        st.caption("Videos may be directly inside that folder, or inside this child folder.")
-        st.write(f"- `{expected_video_child_folder_name()}`")
-
-    with st.expander("Landing URL pattern", expanded=True):
-        mmdd = datetime.now().strftime("%m%d")
-        st.write(f"`{default_landing_url(f'f_v_o_l_{mmdd}_1', str(landing_path_number))}`")
-        st.write(f"`{default_landing_url(f'f_v_o_l_{mmdd}_2', str(landing_path_number))}`")
-else:
-    st.subheader("IMAGE_ONLY")
-    landing_path_number = st.number_input(
-        "Repurely path number",
-        min_value=1,
-        max_value=999999,
-        value=int(env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")) or "100"),
-        help="랜딩 URL의 /surl/P/{숫자} 부분입니다. utm_campaign 값은 광고명으로 유지됩니다.",
-    )
-    creative_count = st.number_input(
-        "Image ad count",
-        min_value=1,
-        max_value=100,
-        value=int(env.get("AD_CREATIVE_COUNT", "4") or "4"),
-        help="기존 IMAGE_ONLY 흐름에서는 이 값이 복제 기준으로 저장되어 실제 이미지 광고는 입력값 + 1개로 구성됩니다. 예: 4 입력 -> 실제 5개.",
-    )
-    next_env["LANDING_PATH_NUMBER"] = str(landing_path_number)
-    per_ad_upload = st.checkbox(
-        "Upload one image per ad",
-        value=env.get("IMAGE_ONLY_UPLOAD_MODE", "PER_AD").upper() != "LEGACY",
-    )
-    media_folder = st.text_input(
-        "Image media folder",
-        value=env.get("IMAGE_ONLY_ASSET_ROOT") or env.get("MEDIA_FOLDER_PATH") or default_image_root(),
-    )
-    image_effective_adset_count = int(adset_count) + 1
-    with st.expander("Expected folder names", expanded=True):
-        detected_folder_names = read_child_folder_names(media_folder, image_effective_adset_count)
-        if detected_folder_names:
-            st.caption("Detected from Image media folder.")
-        else:
-            st.caption("No child folders detected yet. Showing recommended folder names.")
-        for index in range(1, image_effective_adset_count + 1):
-            folder_name = detected_folder_names[index - 1] if index <= len(detected_folder_names) else expected_image_folder_name(index, daily_budget, int(creative_count) + 1, schedule_time)
-            st.write(f"{index}. `{folder_name}`")
-    with st.expander("Landing URL examples", expanded=True):
-        actual_creative_count = int(creative_count) + 1
-        total_image_ads = image_effective_adset_count * actual_creative_count
-        st.caption("실제 자동화에서는 직접 입력 없이 광고명 기준으로 자동 생성됩니다.")
-        st.write(f"Landing URL pattern: `{default_landing_url('{ad_name}', str(landing_path_number))}`")
-        st.write(f"Total generated image URLs: `{total_image_ads}`")
-        for index in range(1, min(total_image_ads, 5) + 1):
-            ad_name = build_image_only_ad_name(index)
-            st.write(f"{index}. `{default_landing_url(ad_name, str(landing_path_number))}`")
-        if total_image_ads > 5:
-            st.caption(f"... plus {total_image_ads - 5} more")
-    next_env["AD_CREATIVE_COUNT"] = str(creative_count)
-    next_env["IMAGE_ONLY_UPLOAD_MODE"] = "PER_AD" if per_ad_upload else "LEGACY"
-    next_env["IMAGE_ONLY_ASSET_ROOT"] = media_folder if per_ad_upload else ""
-    next_env["MEDIA_FOLDER_PATH"] = media_folder
+with st.expander("Derived automation mapping / preview", expanded=True):
+    st.write(f"Derived internal mode: `{campaign_mode}`")
+    if create_new_campaign:
+        st.write(f"Campaign structure: `{campaign_structure}`")
+        if campaign_structure == "CBO":
+            st.write(f"Campaign budget: `{format_budget_preview(campaign_budget) or '(invalid)'}`")
+    if ui_warnings:
+        for warning in ui_warnings:
+            st.warning(warning)
+    if ui_errors:
+        for error in ui_errors:
+            st.error(error)
+    st.dataframe(preview_rows, use_container_width=True)
 
 st.divider()
 
@@ -1188,7 +1137,7 @@ with col1:
 with col2:
     if st.button("Run dry-run"):
         dry_run_env = {**next_env, "DRY_RUN": "true"}
-        errors = validate_form(dry_run_env)
+        errors = validate_form(dry_run_env) + ui_errors
         saved = write_env(dry_run_env)
         st.caption("Saved .env for dry-run")
         st.code(saved, language="dotenv")
@@ -1209,7 +1158,7 @@ with col2:
 with col3:
     if st.button("Run real automation terminal", disabled=not IS_WINDOWS):
         real_env = {**next_env, "DRY_RUN": "false"}
-        errors = validate_form(real_env)
+        errors = validate_form(real_env) + ui_errors
         saved = write_env(real_env)
         st.caption("Saved .env for real run")
         st.code(saved, language="dotenv")
