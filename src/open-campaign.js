@@ -4360,6 +4360,10 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         };
       }).catch(() => ({ ariaLabel: '', objectType: '', surface: '' }));
       const rowKey = rowId || `${Math.round(rowBox.x)}:${Math.round(rowBox.y)}:${rowText.slice(0, 80)}`;
+      const primaryNameText = await row.evaluate((el) => {
+        const nameCell = el.querySelector('[id^="default-button-for-action-menu_"] span._3dfi._3dfj, [id^="default-button-for-action-menu_"], span._3dfi._3dfj');
+        return (nameCell?.innerText || nameCell?.textContent || '').trim();
+      }).catch(() => '');
       const targetAdsetName = adsetIndex <= adsetEndIndex
         ? (isBlogCampaign()
           ? buildBlogAdsetName(adsetIndex, process.env)
@@ -4370,8 +4374,9 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
               : (isImageOnlyCboCampaign() ? buildImageOnlyCboAdsetName(adsetIndex, process.env) : getAdsetName(adsetIndex)))))
         : '';
       const normalizedRowText = normalizeText(rowText);
+      const normalizedPrimaryNameText = normalizeText(primaryNameText || rowText);
       const isAdsetStructureRow =
-        normalizeText(rowMeta.ariaLabel).includes('광고 세트') ||
+        normalizeText(rowMeta.ariaLabel).includes('광고세트') ||
         rowMeta.surface.includes('editor_tree:adset') ||
         /새\s*판매\s*광고\s*세트/.test(normalizedRowText) ||
         /광고\s*세트/.test(normalizedRowText) ||
@@ -4385,9 +4390,9 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           /광고\s*-\s*사본/.test(normalizedRowText) ||
           normalizedRowText.includes('광고명')
         );
-      const isAlreadyTargetAdset = targetAdsetName && normalizedRowText.includes(normalizeText(targetAdsetName));
-      const isDefaultAdsetRow = isAdsetStructureRow && /새\s*판매\s*광고\s*세트/.test(normalizedRowText);
-      const isAdsetCopy = isAdsetStructureRow && /사본|copy/i.test(rowText);
+      const isAlreadyTargetAdset = targetAdsetName && normalizedPrimaryNameText.includes(normalizeText(targetAdsetName));
+      const isDefaultAdsetRow = isAdsetStructureRow && /새\s*판매\s*광고\s*세트/.test(normalizedPrimaryNameText || normalizedRowText);
+      const isAdsetCopy = isAdsetStructureRow && /사본|copy/i.test(primaryNameText || rowText);
       const isAdRowCopy = /사본|copy/i.test(rowText);
       const isDefaultAdRow = /새\s*판매\s*광고(?!\s*세트)/.test(normalizedRowText) || /광고\s*-\s*사본/.test(normalizedRowText);
       const hasPlannedAdName = [...plannedAdNames].some((name) => name && normalizedRowText.includes(name));
@@ -4399,12 +4404,13 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const currentTargetAdName = normalizeText(currentTargetPlan?.name || getAdName(adCreativeIndex));
       const isCurrentTargetAdRow = isAdStructureRow && currentTargetAdName && normalizedRowText.includes(currentTargetAdName);
       const isAdCopy = isAdStructureRow && (isDefaultAdRow || isAdRowCopy || !hasPlannedAdName || isCurrentTargetAdRow);
-      const isBlogAdsetNameRow = isBlogCampaign() && isAdsetStructureRow && /f_[iv]_b_o_l_\d{4}_\d+/i.test(rowText);
-      const isBlogAdsetCopyRow = isBlogAdsetNameRow && /사본|copy/i.test(rowText);
-      const isImageOnlyAdsetNameRow = !isBlogCampaign() && isAdsetStructureRow && /\d{4}\s+리타겟\s+\d+번\s+광고\s*세트/i.test(rowText);
-      const isVideoOnlyAdsetNameRow = isVideoOnlyCampaign() && isAdsetStructureRow && /\d{4}\s+직접세팅\s+광고\s*세트\s*-\s*\d+/i.test(rowText);
-      const isVideoOnlyCboAdsetNameRow = isVideoOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(rowText);
-      const isImageOnlyCboAdsetNameRow = isImageOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(rowText);
+      const adsetDisplayName = primaryNameText || rowText;
+      const isBlogAdsetNameRow = isBlogCampaign() && isAdsetStructureRow && /f_[iv]_b?_?o_l_\d{4}_\d+/i.test(adsetDisplayName);
+      const isBlogAdsetCopyRow = isBlogAdsetNameRow && /사본|copy/i.test(adsetDisplayName);
+      const isImageOnlyAdsetNameRow = !isBlogCampaign() && isAdsetStructureRow && /\d{4}\s+리타겟\s+\d+번\s+광고\s*세트/i.test(adsetDisplayName);
+      const isVideoOnlyAdsetNameRow = isVideoOnlyCampaign() && isAdsetStructureRow && /\d{4}\s+직접세팅\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
+      const isVideoOnlyCboAdsetNameRow = isVideoOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
+      const isImageOnlyCboAdsetNameRow = isImageOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
       const shouldRenameAdsetRow = (isDefaultAdsetRow || isAdsetCopy || isBlogAdsetNameRow || isImageOnlyAdsetNameRow || isVideoOnlyAdsetNameRow || isVideoOnlyCboAdsetNameRow || isImageOnlyCboAdsetNameRow) && adsetIndex <= adsetEndIndex;
 
       if (processedAdsetRows.has(rowKey) && (isAdsetStructureRow || rowText.includes(ADSET_BASE_NAME) || isBlogAdsetNameRow)) {
