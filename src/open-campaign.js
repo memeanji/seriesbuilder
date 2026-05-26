@@ -1384,21 +1384,86 @@ async function fillAdsetDailyBudgetAfterSchedule(page) {
 
 
 async function ensureCampaignStructureRoot(page) {
-  console.log('[STEP] campaign_structure_tree_root 검색');
-  const root = page.locator('#campaign_structure_tree_root').first();
+  console.log('[STEP] campaign structure tree 검색');
 
-  for (let attempt = 1; attempt <= 8; attempt += 1) {
-    const visible = await root.isVisible({ timeout: 3000 }).catch(() => false);
-    console.log(`[DEBUG] campaign_structure_tree_root visible attempt ${attempt}/8:`, visible);
-    if (visible) {
-      await pause(page, 'campaign_structure_tree_root 확인 후 안정화 대기', 3000);
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    const visible = await page.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 &&
+          rect.height > 0 &&
+          style.visibility !== 'hidden' &&
+          style.display !== 'none';
+      };
+      const root = document.querySelector('#campaign_structure_tree_root');
+      if (isVisible(root)) return { ok: true, source: 'campaign_structure_tree_root' };
+      const editorTree = [...document.querySelectorAll('[data-surface*="editor_tree"], [id^="ads_campaign_structure_item_"], [role="rowheader"][aria-label*="광고"], [role="row"]')]
+        .find((el) => isVisible(el) && /광고|campaign|adset|adgroup|f_[iv]_/i.test(el.textContent || el.getAttribute('aria-label') || ''));
+      if (editorTree) {
+        return {
+          ok: true,
+          source: editorTree.id || editorTree.getAttribute('data-surface') || editorTree.getAttribute('aria-label') || editorTree.getAttribute('role') || 'tree-row-fallback',
+        };
+      }
+      return { ok: false, source: '' };
+    }).catch(() => ({ ok: false, source: '' }));
+
+    console.log(`[DEBUG] campaign structure visible attempt ${attempt}/12:`, visible);
+    if (visible.ok) {
+      await pause(page, 'campaign structure 확인 후 안정화 대기', attempt <= 2 ? 1500 : 3000);
       return true;
     }
-    await page.waitForTimeout(3000);
+
+    const openButton = page.getByText(/^열기$/).first();
+    const openVisible = await openButton.isVisible({ timeout: 1000 }).catch(() => false);
+    if (openVisible) {
+      console.log('[STEP] campaign structure 열기 버튼 클릭 시도');
+      await openButton.click({ force: true }).catch(() => null);
+    }
+    await page.waitForTimeout(attempt <= 4 ? 2000 : 4000);
   }
 
-  await debugDump(page, 'campaign_structure_tree_root not found');
-  throw new Error('Could not find id="campaign_structure_tree_root".');
+  await debugDump(page, 'campaign structure tree not found');
+  throw new Error('Could not find campaign structure tree.');
+}
+
+async function scrollCampaignStructureTree(page, deltaY = 700) {
+  const scrolled = await page.evaluate((amount) => {
+    const isVisible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none';
+    };
+    const rows = [...document.querySelectorAll('[data-surface*="editor_tree"], [id^="ads_campaign_structure_item_"], [role="rowheader"][aria-label*="광고"], [role="row"]')]
+      .filter(isVisible);
+    const seed = rows[0] || document.querySelector('#campaign_structure_tree_root');
+    let node = seed;
+    while (node && node !== document.body) {
+      if (node.scrollHeight > node.clientHeight + 20) {
+        node.scrollTop += amount;
+        return {
+          ok: true,
+          tag: node.tagName,
+          id: node.id || '',
+          className: String(node.className || '').slice(0, 120),
+          scrollTop: node.scrollTop,
+          scrollHeight: node.scrollHeight,
+          clientHeight: node.clientHeight,
+        };
+      }
+      node = node.parentElement;
+    }
+    window.scrollBy(0, amount);
+    return { ok: false, tag: 'window' };
+  }, deltaY).catch((error) => ({ ok: false, error: error.message }));
+  console.log('[DEBUG] campaign structure tree scroll:', scrolled);
+  return scrolled;
 }
 
 async function openCorrectAdActionMenu(page, adsetName) {
@@ -2363,7 +2428,8 @@ async function selectExistingAdsetRowByName(page, adsetName) {
       return true;
     }
     console.log(`[WAIT] resume target adset row not visible ${attempt}/18: ${adsetName}`);
-    await page.mouse.wheel(0, attempt <= 6 ? 450 : 900);
+    await scrollCampaignStructureTree(page, attempt <= 6 ? 450 : 900);
+    await page.mouse.wheel(0, attempt <= 6 ? 180 : 320).catch(() => null);
     await page.waitForTimeout(attempt <= 6 ? 1500 : 3000);
   }
 
@@ -4257,7 +4323,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       : null;
     if (resumeOnly && resumeTargetAdsetName && !resumeAdsetBounds) {
       console.log('[WAIT] resume target adset bounds not visible yet:', { resumeTargetAdsetName, attempt });
-      await page.mouse.wheel(0, attempt <= 6 ? 450 : 900);
+      await scrollCampaignStructureTree(page, attempt <= 6 ? 450 : 900);
+      await page.mouse.wheel(0, attempt <= 6 ? 180 : 320).catch(() => null);
       await page.waitForTimeout(attempt <= 6 ? 1500 : 3000);
       continue;
     }
