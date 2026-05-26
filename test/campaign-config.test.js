@@ -480,6 +480,26 @@ test('BLOG_VIDEO uses AD_CREATIVE_COUNT plus one and makes every creative video'
   ]);
 });
 
+test('BLOG_VIDEO keeps global video names instead of adset_name suffix template', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-name-rule-'));
+  await createFlatBlogVideoAssets(root, 2);
+  const plan = await buildBlogMixedPlan(blogEnv(root, {
+    CAMPAIGN_MODE: 'BLOG_VIDEO',
+    ADSET_COUNT: '1',
+    AD_CREATIVE_COUNT: '1',
+    BLOG_IMAGE_ADS_PER_ADSET: '0',
+    BLOG_VIDEO_ADS_PER_ADSET: '2',
+    BLOG_TOTAL_ADS_PER_ADSET: '2',
+    BLOG_ADSET_NAME_PREFIX: '',
+    NAMING_AD_TEMPLATE: '{adset_name}_{ad_idx}',
+  }), { baseDir: root, date: fixedDate });
+
+  assert.deepEqual(plan.adsets[0].ads.map((ad) => ad.name), [
+    'f_v_b_o_l_0520_1',
+    'f_v_b_o_l_0520_2',
+  ]);
+});
+
 test('BLOG_VIDEO can split flat root videos sequentially by adset', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-flat-plan-'));
   await createFlatBlogVideoAssets(root, 6);
