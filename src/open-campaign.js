@@ -610,6 +610,34 @@ function getAdsetName(index) {
   return `${getTodayMMDD()} ${ADSET_BASE_NAME} ${index}번 광고세트`;
 }
 
+function parseAdsetIndexFromDisplayName(text, creativeCountPerAdset = 1) {
+  const value = normalizeText(text || '');
+  const directPatterns = [
+    /\d{4}\s+리타겟\s+(\d+)\s*번\s+광고\s*세트/i,
+    /\d{4}\s+직접세팅\s+광고\s*세트\s*-\s*(\d+)/i,
+    /\d{4}\s+CBO\s+광고\s*세트\s*-\s*(\d+)/i,
+    /(^|\D)(\d+)\s*번\s*(?:블로그|광고|세트|광고세트)/i,
+  ];
+
+  for (const pattern of directPatterns) {
+    const match = value.match(pattern);
+    if (!match) continue;
+    const parsed = Number(match[2] || match[1]);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+
+  const seriesMatch = value.match(/f_[iv]_b?_?o_l_\d{4}_(\d+)/i);
+  if (seriesMatch) {
+    const firstAdIndex = Number(seriesMatch[1]);
+    const count = Math.max(1, Number(creativeCountPerAdset || 1));
+    if (Number.isFinite(firstAdIndex) && firstAdIndex > 0) {
+      return Math.floor((firstAdIndex - 1) / count) + 1;
+    }
+  }
+
+  return null;
+}
+
 async function ensureDirs() {
   await fs.mkdir(DIRS.screenshots, { recursive: true });
   await fs.mkdir(path.resolve('logs'), { recursive: true });
@@ -4365,8 +4393,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
   const totalRenameTarget = (effectiveAdsetCount * effectiveCreativeCount) + effectiveAdsetCount;
   let adsetIndex = resumeOnly ? adsetEndIndex + 1 : adsetStartIndex;
   const maxRenameAttempts = resumeOnly
-    ? Math.max(20, (effectiveMaxCreativeTotal - adCreativeIndex) + 8)
-    : totalRenameTarget;
+    ? Math.max(40, ((effectiveMaxCreativeTotal - adCreativeIndex) + 1) * 3 + 12)
+    : Math.max(totalRenameTarget * 3 + 20, 60);
   const processedAdsetRows = new Set();
   const processedAdRows = new Set();
   const plannedAdNames = new Set(
@@ -4404,7 +4432,16 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       });
     }
 
-    for (const row of rows) {
+    const orderedRows = (await Promise.all(rows.map(async (row) => {
+      const box = await row.boundingBox().catch(() => null);
+      return box ? { row, box } : null;
+    })))
+      .filter(Boolean)
+      .sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x)
+      .map((item) => item.row);
+
+    let visibleAdsetOrdinal = 0;
+    for (const row of orderedRows) {
       const rowText = (await row.innerText().catch(() => '')).trim();
       if (!rowText) continue;
 
@@ -4448,6 +4485,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         /새\s*판매\s*광고\s*세트/.test(normalizedRowText) ||
         /광고\s*세트/.test(normalizedRowText) ||
         normalizedRowText.includes('광고세트');
+      if (isAdsetStructureRow) visibleAdsetOrdinal += 1;
       const isAdStructureRow =
         !isAdsetStructureRow &&
         (
@@ -4479,6 +4517,54 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const isVideoOnlyCboAdsetNameRow = isVideoOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
       const isImageOnlyCboAdsetNameRow = isImageOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
       const shouldRenameAdsetRow = (isDefaultAdsetRow || isAdsetCopy || isBlogAdsetNameRow || isVideoOnlyAdsetNameRow || isVideoOnlyCboAdsetNameRow || isImageOnlyCboAdsetNameRow) && adsetIndex <= adsetEndIndex;
+      const parsedAdsetIndex = isAdsetStructureRow
+        ? parseAdsetIndexFromDisplayName(adsetDisplayName, effectiveCreativeCount)
+        : null;
+
+      if (isAdsetStructureRow) {
+        console.log('[DEBUG] visible adset row index:', {
+          visibleAdsetOrdinal,
+          parsedAdsetIndex,
+          currentTargetAdsetIndex: adsetIndex,
+          targetAdsetName,
+          rowKey,
+          displayName: adsetDisplayName.slice(0, 140),
+        });
+      }
+
+      if (
+        isAdsetStructureRow &&
+        parsedAdsetIndex &&
+        parsedAdsetIndex < adsetIndex &&
+        !isAdsetCopy &&
+        !isBlogAdsetCopyRow &&
+        !isDefaultAdsetRow
+      ) {
+        processedAdsetRows.add(rowKey);
+        console.log('[DEBUG] earlier adset row skipped without advancing target index:', {
+          parsedAdsetIndex,
+          currentTargetAdsetIndex: adsetIndex,
+          rowKey,
+          displayName: adsetDisplayName.slice(0, 140),
+        });
+        continue;
+      }
+
+      if (
+        isAdsetStructureRow &&
+        parsedAdsetIndex &&
+        parsedAdsetIndex > adsetIndex &&
+        !isAdsetCopy &&
+        !isDefaultAdsetRow
+      ) {
+        console.log('[DEBUG] later adset row deferred until target index catches up:', {
+          parsedAdsetIndex,
+          currentTargetAdsetIndex: adsetIndex,
+          rowKey,
+          displayName: adsetDisplayName.slice(0, 140),
+        });
+        continue;
+      }
 
       if (processedAdsetRows.has(rowKey) && (isAdsetStructureRow || rowText.includes(ADSET_BASE_NAME) || isBlogAdsetNameRow)) {
         console.log('[DEBUG] already processed adset row skipped:', { rowKey, rowText: rowText.slice(0, 120) });
@@ -4504,7 +4590,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         continue;
       }
 
-      if (isImageOnlyAdsetNameRow && adsetIndex <= adsetEndIndex) {
+      if (isImageOnlyAdsetNameRow && adsetIndex <= adsetEndIndex && (!parsedAdsetIndex || parsedAdsetIndex === adsetIndex)) {
         processedAdsetRows.add(rowKey);
         console.log('[STEP] image retarget adset name preserved:', {
           currentName: adsetDisplayName,
