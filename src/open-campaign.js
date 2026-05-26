@@ -1597,22 +1597,21 @@ async function findDuplicateCountInputHandle(page) {
         const numeric = /^\d*$/.test(value);
         const duplicateHint = /복제|개수|수량|duplicate|copies|number/i.test(allText);
         const numberType = type === 'number' || role === 'spinbutton';
+        const timeHint = /(^|\s)(분|시|시간|초|오전|오후|minute|minutes|min|hour|hours|time|second|seconds)(\s|$)/i.test(allText) ||
+          /^(분|시|시간|초)$/i.test(ariaLabel);
         const booleanValue = /^(true|false)$/i.test(value);
         const dateOrTime = /:|-/.test(value) || /date|time/i.test(type);
-        return { input, box, type, value, placeholder, ariaLabel, labelText, role, numeric, duplicateHint, numberType, booleanValue, dateOrTime };
+        const score = duplicateHint ? 0 : (value === '1' ? 1 : (numberType ? 2 : 3));
+        return { input, box, type, value, placeholder, ariaLabel, labelText, role, numeric, duplicateHint, numberType, timeHint, booleanValue, dateOrTime, score };
       })
       .filter((item) => {
-        if (item.booleanValue || item.dateOrTime) return false;
+        if (item.booleanValue || item.dateOrTime || item.timeHint) return false;
         if (!item.numeric) return false;
         if (item.value && Number(item.value) > 100) return false;
         return item.duplicateHint || item.numberType || item.value === '1' || item.box.width < 180;
       })
       .sort((a, b) => {
-        const aExact = a.value === '1' ? 0 : 1;
-        const bExact = b.value === '1' ? 0 : 1;
-        const aHint = a.duplicateHint || a.numberType ? 0 : 1;
-        const bHint = b.duplicateHint || b.numberType ? 0 : 1;
-        return aHint - bHint || aExact - bExact || b.box.x - a.box.x || a.box.y - b.box.y;
+        return a.score - b.score || b.box.x - a.box.x || a.box.y - b.box.y;
       });
 
     return candidates[0]?.input || null;
