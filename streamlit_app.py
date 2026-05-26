@@ -218,6 +218,12 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
         adset_count = int(values.get("ADSET_COUNT", "1") or "1")
         for index in range(1, adset_count + 1):
             lines.append(f"BLOG_LANDING_URL_{index}={values.get(f'BLOG_LANDING_URL_{index}', '')}")
+            image_dir = values.get(f"BLOG_ADSET_{index}_IMAGE_DIR", "")
+            video_dir = values.get(f"BLOG_ADSET_{index}_VIDEO_DIR", "")
+            if image_dir:
+                lines.append(f"BLOG_ADSET_{index}_IMAGE_DIR={image_dir}")
+            if video_dir:
+                lines.append(f"BLOG_ADSET_{index}_VIDEO_DIR={video_dir}")
         lines.append("")
     elif mode == "VIDEO_ONLY":
         lines.extend(
@@ -943,15 +949,69 @@ for adset_index in range(1, int(adset_count) + 1):
                 key=f"{adset_key}_url_mode",
             )
 
-        folder_col1, folder_col2 = st.columns(2)
         image_folder = ""
         video_folder = ""
-        with folder_col1:
-            if media_type in {"image", "mixed"}:
-                image_folder = st.text_input("Image folder", value=env.get("IMAGE_ONLY_ASSET_ROOT") or env.get("MEDIA_FOLDER_PATH") or default_image_root(), key=f"{adset_key}_image_folder")
-        with folder_col2:
-            if media_type in {"video", "mixed"}:
-                video_folder = st.text_input("Video folder", value=env.get("VIDEO_ONLY_ASSET_ROOT") or env.get("BLOG_ASSET_ROOT") or default_video_root(), key=f"{adset_key}_video_folder")
+        folder_override = False
+        if media_type == "mixed":
+            inherited_mixed_root = (
+                st.session_state.get("unified_adset_1_mixed_root")
+                or env.get("BLOG_ASSET_ROOT")
+                or default_video_root()
+            )
+            if adset_index == 1:
+                mixed_root = st.text_input(
+                    "소재 루트 폴더",
+                    value=env.get("BLOG_ASSET_ROOT") or default_video_root(),
+                    key=f"{adset_key}_mixed_root",
+                    help="이 폴더 안에 1번 광고세트, 2번 광고세트... 같은 하위 폴더가 들어있는 구조를 권장합니다.",
+                )
+                st.caption("이 폴더가 나머지 광고세트에도 자동 적용됩니다. 각 광고세트 폴더 안에는 이미지/영상 파일을 함께 넣으면 됩니다.")
+            else:
+                folder_override = st.checkbox(
+                    "이 광고세트만 다른 소재 폴더 사용",
+                    value=bool(env.get(f"BLOG_ADSET_{adset_index}_IMAGE_DIR") or env.get(f"BLOG_ADSET_{adset_index}_VIDEO_DIR")),
+                    key=f"{adset_key}_folder_override",
+                )
+                if folder_override:
+                    mixed_root = st.text_input(
+                        "이 광고세트 소재 폴더",
+                        value=env.get(f"BLOG_ADSET_{adset_index}_IMAGE_DIR") or env.get(f"BLOG_ADSET_{adset_index}_VIDEO_DIR") or inherited_mixed_root,
+                        key=f"{adset_key}_mixed_root",
+                        help="예외 상황에서만 사용하세요. 이 폴더 안에서 광고명과 같은 이미지/영상 파일을 찾습니다.",
+                    )
+                else:
+                    mixed_root = str(inherited_mixed_root)
+                    st.caption(f"소재 루트 폴더 자동 적용: `{mixed_root}`")
+            image_folder = mixed_root
+            video_folder = mixed_root
+        else:
+            folder_col1, folder_col2 = st.columns(2)
+            with folder_col1:
+                if media_type == "image":
+                    inherited_image_root = (
+                        st.session_state.get("unified_adset_1_image_folder")
+                        or env.get("IMAGE_ONLY_ASSET_ROOT")
+                        or env.get("MEDIA_FOLDER_PATH")
+                        or default_image_root()
+                    )
+                    image_folder = st.text_input(
+                        "Image folder",
+                        value=inherited_image_root if adset_index > 1 else (env.get("IMAGE_ONLY_ASSET_ROOT") or env.get("MEDIA_FOLDER_PATH") or default_image_root()),
+                        key=f"{adset_key}_image_folder",
+                    )
+            with folder_col2:
+                if media_type == "video":
+                    inherited_video_root = (
+                        st.session_state.get("unified_adset_1_video_folder")
+                        or env.get("VIDEO_ONLY_ASSET_ROOT")
+                        or env.get("BLOG_ASSET_ROOT")
+                        or default_video_root()
+                    )
+                    video_folder = st.text_input(
+                        "Video folder",
+                        value=inherited_video_root if adset_index > 1 else (env.get("VIDEO_ONLY_ASSET_ROOT") or env.get("BLOG_ASSET_ROOT") or default_video_root()),
+                        key=f"{adset_key}_video_folder",
+                    )
 
         default_path_number = int(env.get("LANDING_PATH_NUMBER", env.get("REPURELY_PATH_NUMBER", "100")) or "100")
         path_numbers: list[int] = []
@@ -1044,6 +1104,7 @@ for adset_index in range(1, int(adset_count) + 1):
             "adCount": int(ad_count),
             "imageFolder": image_folder,
             "videoFolder": video_folder,
+            "folderOverride": folder_override,
             "urlMode": url_mode,
             "pathNumbers": path_numbers,
             "sharedLandingUrl": shared_landing_url,
@@ -1127,6 +1188,10 @@ if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT"}:
     next_env["BLOG_VIDEO_AD_NAME_PREFIX"] = "f_v_o_l" if campaign_mode == "BLOG_VIDEO_DIRECT" else "f_v_b_o_l"
     for item in adsets:
         next_env[f"BLOG_LANDING_URL_{item['index']}"] = str(item.get("sharedLandingUrl") or "")
+        if item.get("folderOverride"):
+            override_folder = str(item.get("videoFolder") or item.get("imageFolder") or "")
+            next_env[f"BLOG_ADSET_{item['index']}_IMAGE_DIR"] = override_folder
+            next_env[f"BLOG_ADSET_{item['index']}_VIDEO_DIR"] = override_folder
 elif campaign_mode == "IMAGE_ONLY":
     next_env["IMAGE_ONLY_UPLOAD_MODE"] = "PER_AD"
     next_env["IMAGE_ONLY_ASSET_ROOT"] = str(first_adset.get("imageFolder") or "")
