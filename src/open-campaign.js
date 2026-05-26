@@ -2743,6 +2743,70 @@ function getCreativeSettingsEntryLocator(page) {
     .or(page.getByText(settingsPattern).first());
 }
 
+async function clickCreativeSettingsEntry(page, attempt = 1) {
+  const creativeSettings = getCreativeSettingsEntryLocator(page);
+  const visible = await creativeSettings.isVisible({ timeout: 3000 }).catch(() => false);
+  if (visible) {
+    await creativeSettings.scrollIntoViewIfNeeded().catch(() => null);
+    const box = await creativeSettings.boundingBox().catch(() => null);
+    console.log('[DEBUG] creative/media settings locator candidate:', { attempt, box });
+    await creativeSettings.click({ force: true }).catch(async () => {
+      if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    });
+    await page.waitForTimeout(2500);
+    return true;
+  }
+
+  const domResult = await page.evaluate(() => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const pattern = /크리에이티브\s*설정|미디어\s*설정|Creative\s*settings|Media\s*settings/i;
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const candidates = [...document.querySelectorAll('[role="button"], button, div[tabindex="0"], span, div')]
+      .map((el) => {
+        const text = normalize(`${el.getAttribute('aria-label') || ''} ${el.innerText || el.textContent || ''}`);
+        const rect = el.getBoundingClientRect();
+        const clickable = el.closest('[role="button"], button, div[tabindex="0"]') || el;
+        return {
+          el,
+          clickable,
+          text,
+          exact: pattern.test(text),
+          role: el.getAttribute('role') || clickable.getAttribute?.('role') || '',
+          box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        };
+      })
+      .filter((item) => item.exact && isVisible(item.el))
+      .sort((a, b) => {
+        const aButton = /button/i.test(a.role) ? 0 : 1;
+        const bButton = /button/i.test(b.role) ? 0 : 1;
+        return aButton - bButton || a.box.y - b.box.y || a.box.x - b.box.x;
+      });
+    const chosen = candidates[0];
+    if (!chosen) return { clicked: false };
+    chosen.clickable.scrollIntoView({ block: 'center', inline: 'center' });
+    chosen.clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+    chosen.clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+    chosen.clickable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    return {
+      clicked: true,
+      text: chosen.text.slice(0, 120),
+      role: chosen.role,
+      box: chosen.box,
+    };
+  }).catch((error) => ({ clicked: false, error: error.message }));
+
+  console.log('[DEBUG] creative/media settings DOM fallback:', { attempt, domResult });
+  if (domResult.clicked) {
+    await page.waitForTimeout(2500);
+    return true;
+  }
+  return false;
+}
+
 async function isCreativeUploadVisible(page) {
   return page
     .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
@@ -4090,7 +4154,6 @@ async function fillLandingUrlOnly(page, targetAdName, landingUrl = '') {
 }
 
 async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landingUrl = '', adFormat = AD_FORMAT) {
-  const creativeSettings = getCreativeSettingsEntryLocator(page);
   const creativeAdPattern = getCreativeFormatPattern(adFormat);
   const creativeAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: creativeAdPattern }).first();
   const uploadButton = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli').filter({ hasText: /^업로드/ }).first();
@@ -4098,41 +4161,11 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landing
   let creativeOpened = false;
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     console.log(`[STEP] creative settings entry attempt ${attempt}/10`);
-    const creativeVisible = await creativeSettings.isVisible({ timeout: 10000 }).catch(() => false);
-    if (!creativeVisible) {
-      console.log(`[WAIT] creative settings button search retry ${attempt}/10`);
+    const clickedSettings = await clickCreativeSettingsEntry(page, attempt);
+    if (!clickedSettings) {
+      console.log(`[WAIT] creative/media settings button search retry ${attempt}/10`);
       await page.waitForTimeout(5000);
       continue;
-    }
-
-    await page.waitForTimeout(5000);
-    const settingBox = await creativeSettings.boundingBox().catch(() => null);
-    console.log('[DEBUG] creative settings button box:', settingBox);
-
-    let clicked = false;
-    await creativeSettings.click({ force: true }).then(() => { clicked = true; }).catch(() => null);
-
-    if (!clicked && settingBox) {
-      const clickTargets = [
-        { x: settingBox.x + settingBox.width / 2, y: settingBox.y + settingBox.height / 2 },
-        { x: settingBox.x + settingBox.width / 2 + 12, y: settingBox.y + settingBox.height / 2 },
-        { x: settingBox.x + settingBox.width / 2 - 12, y: settingBox.y + settingBox.height / 2 },
-        { x: settingBox.x + settingBox.width / 2, y: settingBox.y + settingBox.height / 2 + 8 },
-        { x: settingBox.x + settingBox.width / 2, y: settingBox.y + settingBox.height / 2 - 8 },
-      ];
-
-      for (const [idx, pt] of clickTargets.entries()) {
-        console.log('[DEBUG] creative settings coordinate click attempt:', { attempt, index: idx + 1, pt });
-        await page.mouse.click(pt.x, pt.y).catch(() => null);
-        await page.waitForTimeout(2000);
-
-        const checkCreativeAdMode = await creativeAdTab.isVisible({ timeout: 1000 }).catch(() => false);
-        const checkUpload = await uploadButton.isVisible({ timeout: 1000 }).catch(() => false);
-        if (checkCreativeAdMode || checkUpload) {
-          clicked = true;
-          break;
-        }
-      }
     }
 
     await page.waitForTimeout(7000);
@@ -4195,25 +4228,14 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landing
 async function enterCreativeInsideEditor(page, adFormat = AD_FORMAT) {
   console.log('[STEP] creative internal entry started:', { adFormat, label: getCreativeFormatLabel(adFormat) });
 
-  const creativeSettings = getCreativeSettingsEntryLocator(page);
-
   for (let attempt = 1; attempt <= 10; attempt += 1) {
     console.log(`[STEP] 크리에이티브/미디어 설정 버튼 클릭 시도 ${attempt}/10`);
-    const visible = await creativeSettings.isVisible({ timeout: 10000 }).catch(() => false);
-    if (!visible) {
+    const clickedSettings = await clickCreativeSettingsEntry(page, attempt);
+    if (!clickedSettings) {
       console.log(`[WAIT] 크리에이티브/미디어 설정 버튼 대기 ${attempt}/10`);
       await page.waitForTimeout(5000);
       continue;
     }
-
-    await creativeSettings.scrollIntoViewIfNeeded().catch(() => null);
-    await page.waitForTimeout(2000);
-    const box = await creativeSettings.boundingBox().catch(() => null);
-    console.log('[DEBUG] 크리에이티브/미디어 설정 버튼 box:', box);
-
-    await creativeSettings.click({ force: true }).catch(async () => {
-      if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    });
     await page.waitForTimeout(6000);
 
     const creativeFormatVisible = await page.getByText(getCreativeFormatPattern(adFormat)).first().isVisible({ timeout: 5000 }).catch(() => false);
@@ -4456,7 +4478,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const isVideoOnlyAdsetNameRow = isVideoOnlyCampaign() && isAdsetStructureRow && /\d{4}\s+직접세팅\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
       const isVideoOnlyCboAdsetNameRow = isVideoOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
       const isImageOnlyCboAdsetNameRow = isImageOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
-      const shouldRenameAdsetRow = (isDefaultAdsetRow || isAdsetCopy || isBlogAdsetNameRow || isImageOnlyAdsetNameRow || isVideoOnlyAdsetNameRow || isVideoOnlyCboAdsetNameRow || isImageOnlyCboAdsetNameRow) && adsetIndex <= adsetEndIndex;
+      const shouldRenameAdsetRow = (isDefaultAdsetRow || isAdsetCopy || isBlogAdsetNameRow || isVideoOnlyAdsetNameRow || isVideoOnlyCboAdsetNameRow || isImageOnlyCboAdsetNameRow) && adsetIndex <= adsetEndIndex;
 
       if (processedAdsetRows.has(rowKey) && (isAdsetStructureRow || rowText.includes(ADSET_BASE_NAME) || isBlogAdsetNameRow)) {
         console.log('[DEBUG] already processed adset row skipped:', { rowKey, rowText: rowText.slice(0, 120) });
@@ -4477,6 +4499,18 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       if (isAlreadyTargetAdset && !isAdsetCopy && !isBlogAdsetCopyRow && adsetIndex <= adsetEndIndex) {
         processedAdsetRows.add(rowKey);
         console.log('[STEP] adset name already changed - moving to next adset:', { targetAdsetName, rowKey });
+        adsetIndex += 1;
+        progressedThisAttempt = true;
+        continue;
+      }
+
+      if (isImageOnlyAdsetNameRow && adsetIndex <= adsetEndIndex) {
+        processedAdsetRows.add(rowKey);
+        console.log('[STEP] image retarget adset name preserved:', {
+          currentName: adsetDisplayName,
+          targetAdsetName,
+          rowKey,
+        });
         adsetIndex += 1;
         progressedThisAttempt = true;
         continue;
