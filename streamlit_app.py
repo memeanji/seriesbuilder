@@ -957,13 +957,43 @@ for adset_index in range(1, int(adset_count) + 1):
         path_numbers: list[int] = []
         shared_landing_url = ""
         if url_mode == "per_ad_auto":
-            path_raw = st.text_input(
-                "Path numbers",
-                value=" ".join([str(default_path_number)] * int(ad_count)),
-                help="광고 개수만큼 입력합니다. 예: 100 101 102",
-                key=f"{adset_key}_paths",
+            common_path_options = [100, 99, 67]
+            path_col1, path_col2 = st.columns([1, 2])
+            with path_col1:
+                selected_path_option = st.selectbox(
+                    "기본 path number",
+                    [*common_path_options, "직접 입력"],
+                    index=common_path_options.index(default_path_number) if default_path_number in common_path_options else len(common_path_options),
+                    key=f"{adset_key}_path_select",
+                    help="선택한 숫자가 광고 개수만큼 자동 적용됩니다. 예: 광고 3개 + 100 선택 → 100 100 100",
+                )
+            with path_col2:
+                custom_path_number = st.number_input(
+                    "직접 path number",
+                    min_value=1,
+                    max_value=999999,
+                    value=default_path_number,
+                    disabled=selected_path_option != "직접 입력",
+                    key=f"{adset_key}_path_custom",
+                )
+            base_path_number = int(custom_path_number if selected_path_option == "직접 입력" else selected_path_option)
+            path_numbers = [base_path_number for _ in range(int(ad_count))]
+            edit_path_numbers = st.checkbox(
+                "광고별 path number 개별 수정",
+                value=False,
+                key=f"{adset_key}_path_edit",
+                help="대부분은 끄고 사용하면 됩니다. 켜면 광고별로 100 101 102처럼 다르게 넣을 수 있습니다.",
             )
-            path_numbers = split_path_numbers(path_raw, int(ad_count), default_path_number)
+            if edit_path_numbers:
+                path_raw = st.text_input(
+                    "Path numbers",
+                    value=" ".join(str(item) for item in path_numbers),
+                    help="광고 개수만큼 입력합니다. 예: 100 101 102",
+                    key=f"{adset_key}_paths",
+                )
+                path_numbers = split_path_numbers(path_raw, int(ad_count), base_path_number)
+            else:
+                st.caption(f"자동 적용: 광고 {int(ad_count)}개 → path number `{base_path_number}`가 {int(ad_count)}개 모두에 들어갑니다.")
         else:
             shared_landing_url = st.text_area(
                 "Shared landing URL",
