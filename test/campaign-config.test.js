@@ -518,6 +518,30 @@ test('BLOG_VIDEO can read per-adset folders named by first global video ad', asy
   assert.match(plan.adsets[1].ads[0].assetPath, /f_v_b_o_l_0520_4/);
 });
 
+test('BLOG_VIDEO can recover sibling adset folders when root points at the first adset folder', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-selected-first-folder-'));
+  await createNamedBlogVideoAssetFolders(root, 2, 4);
+  const plan = await buildBlogMixedPlan(blogEnv(root, {
+    CAMPAIGN_MODE: 'BLOG_VIDEO',
+    ADSET_COUNT: '2',
+    AD_CREATIVE_COUNT: '3',
+    BLOG_IMAGE_ADS_PER_ADSET: '0',
+    BLOG_VIDEO_ADS_PER_ADSET: '4',
+    BLOG_TOTAL_ADS_PER_ADSET: '4',
+    BLOG_ASSET_ROOT: './assets/blog/f_v_b_o_l_0520_1',
+    BLOG_ADSET_NAME_PREFIX: '',
+    BLOG_ASSET_MATCH_MODE: 'exact',
+  }), { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.adsets[1].name, 'f_v_b_o_l_0520_5');
+  assert.deepEqual(plan.adsets[1].ads.map((ad) => path.basename(ad.assetPath)), [
+    'f_v_b_o_l_0520_5.mp4',
+    'f_v_b_o_l_0520_6.mp4',
+    'f_v_b_o_l_0520_7.mp4',
+    'f_v_b_o_l_0520_8.mp4',
+  ]);
+});
+
 test('BLOG_VIDEO keeps global video names instead of adset_name suffix template', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-name-rule-'));
   await createFlatBlogVideoAssets(root, 2);

@@ -527,7 +527,26 @@ async function resolveBlogAssetDir(adsetIndex, env, options, kind) {
   const conventionalDir = path.join(rootDir, `adset_${adsetIndex}`, kind.toLowerCase() === 'image' ? 'images' : 'videos');
   if (await pathExists(conventionalDir)) return conventionalDir;
 
-  return findBlogAdsetFolderFromRoot(rootDir, adsetIndex, options);
+  const rootMatchedDir = await findBlogAdsetFolderFromRoot(rootDir, adsetIndex, options);
+  if (rootMatchedDir) return rootMatchedDir;
+
+  const rootEntries = await fs.readdir(rootDir, { withFileTypes: true }).catch(() => []);
+  const rootLooksLikeSelectedAdsetFolder = rootEntries.some((entry) => (
+    entry.isFile() && (IMAGE_EXTENSIONS.test(entry.name) || VIDEO_EXTENSIONS.test(entry.name))
+  ));
+  if (!rootLooksLikeSelectedAdsetFolder) return '';
+
+  const parentDir = path.dirname(rootDir);
+  if (parentDir === rootDir) return '';
+  if (expectedAdsetName) {
+    const siblingNamedDir = path.join(parentDir, expectedAdsetName);
+    if (await pathExists(siblingNamedDir)) return siblingNamedDir;
+  }
+
+  const siblingConventionalDir = path.join(parentDir, `adset_${adsetIndex}`, kind.toLowerCase() === 'image' ? 'images' : 'videos');
+  if (await pathExists(siblingConventionalDir)) return siblingConventionalDir;
+
+  return findBlogAdsetFolderFromRoot(parentDir, adsetIndex, options);
 }
 
 function resolveBlogAssetRoot(env = process.env, options = {}) {
