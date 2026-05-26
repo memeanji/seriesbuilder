@@ -542,6 +542,40 @@ test('BLOG_VIDEO can recover sibling adset folders when root points at the first
   ]);
 });
 
+test('BLOG_VIDEO can recover Korean numbered sibling folders from a selected first folder', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-korean-sibling-folder-'));
+  const blogRoot = path.join(root, 'assets', 'blog');
+  for (let adsetIndex = 1; adsetIndex <= 2; adsetIndex += 1) {
+    const startIndex = (adsetIndex - 1) * 4 + 1;
+    const adsetDir = path.join(blogRoot, `${adsetIndex}번 블로그 광고 세팅-일예산 30만원.05시`);
+    await fs.mkdir(adsetDir, { recursive: true });
+    for (let offset = 0; offset < 4; offset += 1) {
+      const globalIndex = startIndex + offset;
+      await fs.writeFile(path.join(adsetDir, `f_v_b_o_l_0520_${globalIndex}.mp4`), '');
+    }
+  }
+
+  const plan = await buildBlogMixedPlan(blogEnv(root, {
+    CAMPAIGN_MODE: 'BLOG_VIDEO',
+    ADSET_COUNT: '2',
+    AD_CREATIVE_COUNT: '3',
+    BLOG_IMAGE_ADS_PER_ADSET: '0',
+    BLOG_VIDEO_ADS_PER_ADSET: '4',
+    BLOG_TOTAL_ADS_PER_ADSET: '4',
+    BLOG_ASSET_ROOT: './assets/blog/1번 블로그 광고 세팅-일예산 30만원.05시',
+    BLOG_ADSET_NAME_PREFIX: '',
+    BLOG_ASSET_MATCH_MODE: 'exact',
+  }), { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.adsets[1].name, 'f_v_b_o_l_0520_5');
+  assert.deepEqual(plan.adsets[1].ads.map((ad) => path.basename(ad.assetPath)), [
+    'f_v_b_o_l_0520_5.mp4',
+    'f_v_b_o_l_0520_6.mp4',
+    'f_v_b_o_l_0520_7.mp4',
+    'f_v_b_o_l_0520_8.mp4',
+  ]);
+});
+
 test('BLOG_VIDEO keeps global video names instead of adset_name suffix template', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-name-rule-'));
   await createFlatBlogVideoAssets(root, 2);

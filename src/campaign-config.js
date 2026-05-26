@@ -433,6 +433,12 @@ async function findBlogAdsetFolderFromRoot(rootPath, adsetIndex, options = {}) {
   const fallback = directories.find((entry) => entry.name.includes(fallbackToken));
   if (fallback) return fallback.fullPath;
 
+  const koreanNumberPrefix = directories.find((entry) => new RegExp(`^\\s*${adsetIndex}\\s*번`).test(entry.name));
+  if (koreanNumberPrefix) return koreanNumberPrefix.fullPath;
+
+  const adsetNumberToken = directories.find((entry) => new RegExp(`(^|\\D)${adsetIndex}\\s*(번|beon|adset|set|세트|광고)`, 'i').test(entry.name));
+  if (adsetNumberToken) return adsetNumberToken.fullPath;
+
   const loosePattern = new RegExp(`(^|\\D)${adsetIndex}\\s*번\\s*광고\\s*세트`, 'i');
   const loose = directories.find((entry) => loosePattern.test(entry.name));
   return loose?.fullPath || '';
