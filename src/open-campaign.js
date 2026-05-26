@@ -2727,6 +2727,54 @@ async function selectCreativeAdModeWithRequestedClasses(page, adFormat = AD_FORM
   await selectImageAdModeWithRequestedClasses(page);
 }
 
+function getCreativeSettingsEntryLocator(page) {
+  const settingsPattern = /크리에이티브\s*설정|미디어\s*설정|Creative\s*settings|Media\s*settings/i;
+  return page
+    .locator('div.x78zum5.xdt5ytf.x2lwn1j.xeuugli.xkh2ocl')
+    .filter({ hasText: settingsPattern })
+    .first()
+    .or(
+      page
+        .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x1iyjqo2')
+        .filter({ hasText: settingsPattern })
+        .first(),
+    )
+    .or(page.getByRole('button', { name: settingsPattern }).first())
+    .or(page.getByText(settingsPattern).first());
+}
+
+async function isCreativeUploadVisible(page) {
+  return page
+    .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli')
+    .filter({ hasText: /^업로드/ })
+    .first()
+    .or(page.getByRole('button', { name: /^업로드|Upload/i }).first())
+    .or(page.getByText(/^업로드|Upload/i).first())
+    .isVisible({ timeout: 1500 })
+    .catch(() => false);
+}
+
+async function advanceFromMediaSettingsToUploadIfNeeded(page, adFormat = AD_FORMAT) {
+  const uploadVisible = await isCreativeUploadVisible(page);
+  if (uploadVisible) {
+    console.log('[STEP] media settings already at upload step:', { adFormat });
+    return;
+  }
+
+  const nextClicked = await clickOptionalMediaPickerNextButton(page, `${adFormat}-after-media-type-select`, 8000);
+  if (!nextClicked) {
+    console.log('[DEBUG] media settings next button not visible after ad type selection:', { adFormat });
+    return;
+  }
+
+  await page.waitForTimeout(3000);
+  const uploadVisibleAfterNext = await isCreativeUploadVisible(page);
+  console.log('[STEP] media settings advanced after ad type selection:', {
+    adFormat,
+    uploadVisible: uploadVisibleAfterNext,
+  });
+}
+
 async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFiles = null, adFormat = AD_FORMAT) {
   const desktopRoot = path.join(process.env.USERPROFILE || process.env.HOME || '.', 'Desktop');
   const targetFolderName = targetAdName.replace(/_\\d+$/, '');
@@ -4042,7 +4090,7 @@ async function fillLandingUrlOnly(page, targetAdName, landingUrl = '') {
 }
 
 async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landingUrl = '', adFormat = AD_FORMAT) {
-  const creativeSettings = page.locator('div.x78zum5.xdt5ytf.x2lwn1j.xeuugli.xkh2ocl').filter({ hasText: /크리에이티브 설정/ }).first().or(page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x1iyjqo2').filter({ hasText: /^크리에이티브 설정$/ }).first());
+  const creativeSettings = getCreativeSettingsEntryLocator(page);
   const creativeAdPattern = getCreativeFormatPattern(adFormat);
   const creativeAdTab = page.locator('div.x1vvvo52.x1fvot60.xo1l8bm.xxio538.xbsr9hj.xq9mrsl.x1mzt3pk.x1vvkbs.x13faqbe.xeuugli.x1iyjqo2').filter({ hasText: creativeAdPattern }).first();
   const uploadButton = page.locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli').filter({ hasText: /^업로드/ }).first();
@@ -4093,7 +4141,7 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landing
     const openedByUpload = await uploadButton.isVisible({ timeout: 5000 }).catch(() => false);
     console.log('[DEBUG] creative settings opened check:', { adFormat, openedByCreativeAdMode, openedByUpload });
 
-    if (openedByCreativeAdMode && openedByUpload) {
+    if (openedByCreativeAdMode || openedByUpload) {
       creativeOpened = true;
       console.log('[STEP] creative settings opened successfully');
       break;
@@ -4110,6 +4158,7 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landing
 
   console.log('[STEP] creative settings opened - selecting ad mode from env');
   await selectCreativeAdModeWithRequestedClasses(page, adFormat);
+  await advanceFromMediaSettingsToUploadIfNeeded(page, adFormat);
   await page.waitForTimeout(4000);
 
   const targetUrl = landingUrl || `https://repurely.com/surl/P/100?utm_source=f&utm_medium=f&utm_campaign=${getLandingCampaignName(targetAdName)}`;
@@ -4146,23 +4195,13 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landing
 async function enterCreativeInsideEditor(page, adFormat = AD_FORMAT) {
   console.log('[STEP] creative internal entry started:', { adFormat, label: getCreativeFormatLabel(adFormat) });
 
-  const creativeSettings = page
-    .locator('div.x78zum5.xdt5ytf.x2lwn1j.xeuugli.xkh2ocl')
-    .filter({ hasText: /크리에이티브 설정/ })
-    .first()
-    .or(
-      page
-        .locator('div.x1vvvo52.x1fvot60.xk50ysn.xxio538.x1heor9g.xuxw1ft.x6ikm8r.x10wlt62.xlyipyv.x1h4wwuj.xeuugli.x1iyjqo2')
-        .filter({ hasText: /^크리에이티브 설정$/ })
-        .first(),
-    )
-    .or(page.getByText(/^크리에이티브 설정$/).first());
+  const creativeSettings = getCreativeSettingsEntryLocator(page);
 
   for (let attempt = 1; attempt <= 10; attempt += 1) {
-    console.log(`[STEP] 크리에이티브 설정 버튼 클릭 시도 ${attempt}/10`);
+    console.log(`[STEP] 크리에이티브/미디어 설정 버튼 클릭 시도 ${attempt}/10`);
     const visible = await creativeSettings.isVisible({ timeout: 10000 }).catch(() => false);
     if (!visible) {
-      console.log(`[WAIT] 크리에이티브 설정 버튼 대기 ${attempt}/10`);
+      console.log(`[WAIT] 크리에이티브/미디어 설정 버튼 대기 ${attempt}/10`);
       await page.waitForTimeout(5000);
       continue;
     }
@@ -4170,7 +4209,7 @@ async function enterCreativeInsideEditor(page, adFormat = AD_FORMAT) {
     await creativeSettings.scrollIntoViewIfNeeded().catch(() => null);
     await page.waitForTimeout(2000);
     const box = await creativeSettings.boundingBox().catch(() => null);
-    console.log('[DEBUG] 크리에이티브 설정 버튼 box:', box);
+    console.log('[DEBUG] 크리에이티브/미디어 설정 버튼 box:', box);
 
     await creativeSettings.click({ force: true }).catch(async () => {
       if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -4178,9 +4217,15 @@ async function enterCreativeInsideEditor(page, adFormat = AD_FORMAT) {
     await page.waitForTimeout(6000);
 
     const creativeFormatVisible = await page.getByText(getCreativeFormatPattern(adFormat)).first().isVisible({ timeout: 5000 }).catch(() => false);
-    console.log('[DEBUG] creative settings click exposed ad mode:', { attempt, adFormat, creativeFormatVisible });
+    const uploadVisible = await isCreativeUploadVisible(page);
+    console.log('[DEBUG] creative settings click exposed ad mode:', { attempt, adFormat, creativeFormatVisible, uploadVisible });
+    if (uploadVisible && !creativeFormatVisible) {
+      console.log('[STEP] creative/media settings opened directly at upload step:', { adFormat });
+      return;
+    }
     if (creativeFormatVisible) {
       await selectCreativeAdModeWithRequestedClasses(page, adFormat);
+      await advanceFromMediaSettingsToUploadIfNeeded(page, adFormat);
       await page.waitForTimeout(4000);
       console.log('[STEP] creative settings -> ad mode entry completed:', { adFormat });
       return;
