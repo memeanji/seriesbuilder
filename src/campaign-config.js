@@ -518,6 +518,12 @@ async function resolveBlogAssetDir(adsetIndex, env, options, kind) {
   if (configuredDir) return resolveAssetPath(configuredDir, baseDir);
   if (!rootDir) return '';
 
+  const expectedAdsetName = String(options.expectedAdsetName || '').trim();
+  if (expectedAdsetName) {
+    const namedDir = path.join(rootDir, expectedAdsetName);
+    if (await pathExists(namedDir)) return namedDir;
+  }
+
   const conventionalDir = path.join(rootDir, `adset_${adsetIndex}`, kind.toLowerCase() === 'image' ? 'images' : 'videos');
   if (await pathExists(conventionalDir)) return conventionalDir;
 
@@ -559,12 +565,13 @@ async function getFlatBlogVideoAssets(env = process.env, options = {}) {
 }
 
 async function getBlogVideoAssetsForAdset(adsetIndex, totalAdsPerAdset, env = process.env, options = {}) {
-  const folderAssets = await getVideoAssetsForAdset(adsetIndex, env, options);
+  const startIndex = (adsetIndex - 1) * totalAdsPerAdset;
+  const expectedAdsetName = options.expectedAdsetName || buildBlogVideoAdName(startIndex + 1, env, options.date || new Date());
+  const folderAssets = await getVideoAssetsForAdset(adsetIndex, env, { ...options, expectedAdsetName });
   if (folderAssets.length) return folderAssets;
 
   const flatAssets = await getFlatBlogVideoAssets(env, options);
   if (!flatAssets.length) return [];
-  const startIndex = (adsetIndex - 1) * totalAdsPerAdset;
   return flatAssets.slice(startIndex, startIndex + totalAdsPerAdset);
 }
 
@@ -651,11 +658,14 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
 
   const adsets = [];
   for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
-    const adsetName = buildBlogAdsetName(adsetIndex, env, date);
+    const adIndexBase = (adsetIndex - 1) * totalAdsPerAdset;
+    const adsetName = isBlogVideo
+      ? buildBlogVideoAdName(adIndexBase + 1, env, date)
+      : buildBlogAdsetName(adsetIndex, env, date);
     const landingUrl = isBlogVideoDirect ? '' : getLandingUrlForAdset(adsetIndex, env);
     const imageAssets = await getImageAssetsForAdset(adsetIndex, env, { baseDir });
     const videoAssets = isBlogVideo
-      ? await getBlogVideoAssetsForAdset(adsetIndex, totalAdsPerAdset, env, { baseDir })
+      ? await getBlogVideoAssetsForAdset(adsetIndex, totalAdsPerAdset, env, { baseDir, date, expectedAdsetName: adsetName })
       : await getVideoAssetsForAdset(adsetIndex, env, { baseDir });
     const videoAsset = videoAssets[0] || '';
     const exactBlogAssetNames = shouldRequireExactBlogAssetNames(env);
@@ -688,7 +698,6 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
     }
 
     const ads = [];
-    const adIndexBase = (adsetIndex - 1) * totalAdsPerAdset;
     for (let imageIndex = 1; imageIndex <= imageAdsPerAdset; imageIndex += 1) {
       const globalAdIndex = adIndexBase + imageIndex;
       const defaultImageAdName = buildBlogImageAdName(globalAdIndex, env, date);

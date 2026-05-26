@@ -128,6 +128,19 @@ async function createFlatBlogVideoAssets(root, videoCount = 6) {
   }
 }
 
+async function createNamedBlogVideoAssetFolders(root, adsetCount = 2, videoCount = 3) {
+  const blogRoot = path.join(root, 'assets', 'blog');
+  for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
+    const startIndex = (adsetIndex - 1) * videoCount + 1;
+    const videoDir = path.join(blogRoot, `f_v_b_o_l_0520_${startIndex}`);
+    await fs.mkdir(videoDir, { recursive: true });
+    for (let offset = 0; offset < videoCount; offset += 1) {
+      const globalIndex = startIndex + offset;
+      await fs.writeFile(path.join(videoDir, `f_v_b_o_l_0520_${globalIndex}.mp4`), '');
+    }
+  }
+}
+
 async function createKoreanBlogAssets(root, adsetCount = 2, imageCount = 4, includeVideo = true) {
   for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
     const adsetDir = path.join(root, 'assets', 'blog', `0520 ${adsetIndex}번 광고세트-일예산 30만원-이미지 4개 + 영상 1개-익일 05시`);
@@ -468,6 +481,7 @@ test('BLOG_VIDEO uses AD_CREATIVE_COUNT plus one and makes every creative video'
   assert.equal(plan.imageAdsPerAdset, 0);
   assert.equal(plan.videoAdsPerAdset, 3);
   assert.equal(plan.adsets[0].name, 'f_v_b_o_l_0520_1');
+  assert.equal(plan.adsets[1].name, 'f_v_b_o_l_0520_4');
   assert.deepEqual(plan.adsets[0].ads.map((ad) => `${ad.type}:${ad.name}`), [
     'video:f_v_b_o_l_0520_1',
     'video:f_v_b_o_l_0520_2',
@@ -478,6 +492,30 @@ test('BLOG_VIDEO uses AD_CREATIVE_COUNT plus one and makes every creative video'
     'video:f_v_b_o_l_0520_5',
     'video:f_v_b_o_l_0520_6',
   ]);
+});
+
+test('BLOG_VIDEO can read per-adset folders named by first global video ad', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-named-folder-plan-'));
+  await createNamedBlogVideoAssetFolders(root, 2, 3);
+  const plan = await buildBlogMixedPlan(blogEnv(root, {
+    CAMPAIGN_MODE: 'BLOG_VIDEO',
+    ADSET_COUNT: '2',
+    AD_CREATIVE_COUNT: '2',
+    BLOG_IMAGE_ADS_PER_ADSET: '0',
+    BLOG_VIDEO_ADS_PER_ADSET: '3',
+    BLOG_TOTAL_ADS_PER_ADSET: '3',
+    BLOG_ADSET_NAME_PREFIX: '',
+    BLOG_ASSET_MATCH_MODE: 'exact',
+  }), { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.adsets[0].name, 'f_v_b_o_l_0520_1');
+  assert.equal(plan.adsets[1].name, 'f_v_b_o_l_0520_4');
+  assert.deepEqual(plan.adsets[1].ads.map((ad) => path.basename(ad.assetPath)), [
+    'f_v_b_o_l_0520_4.mp4',
+    'f_v_b_o_l_0520_5.mp4',
+    'f_v_b_o_l_0520_6.mp4',
+  ]);
+  assert.match(plan.adsets[1].ads[0].assetPath, /f_v_b_o_l_0520_4/);
 });
 
 test('BLOG_VIDEO keeps global video names instead of adset_name suffix template', async () => {
@@ -540,7 +578,7 @@ test('BLOG_VIDEO allows AD_CREATIVE_COUNT zero for one video creative per adset'
 
   assert.equal(plan.totalAdsPerAdset, 1);
   assert.equal(plan.videoAdsPerAdset, 1);
-  assert.equal(plan.adsets[0].name, '블로그 영상 1번');
+  assert.equal(plan.adsets[0].name, 'f_v_b_o_l_0520_1');
   assert.deepEqual(plan.adsets[0].ads.map((ad) => `${ad.type}:${ad.name}`), [
     'video:f_v_b_o_l_0520_1',
   ]);
