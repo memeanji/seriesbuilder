@@ -707,7 +707,7 @@ with st.expander("공통 wait/retry 설정", expanded=False):
         )
 
 with st.expander("실패 지점부터 재실행", expanded=False):
-    st.caption("광고명 변경/소재 업로드 중 중단된 경우, 실패한 광고세트 번호와 그 안의 광고 번호를 지정하면 해당 광고세트를 먼저 찾아 들어간 뒤 이어서 처리합니다.")
+    st.caption("광고명 변경/소재 업로드 중 중단된 경우, 실패한 광고명을 그대로 입력하면 그 광고명부터 다시 찾고 이어서 처리합니다.")
     latest_resume = latest_failed_resume_point()
     if latest_resume:
         st.write(
@@ -732,39 +732,28 @@ with st.expander("실패 지점부터 재실행", expanded=False):
         help="신규 실행이면 반드시 꺼두세요. 켜져 있을 때만 RESUME_FROM_AD_INDEX/NAME이 .env에 저장됩니다.",
     )
     st.session_state.resume_mode_enabled = resume_mode_enabled
-    creatives_per_adset_for_resume = actual_creatives_per_adset(env)
-    saved_resume_index = max(1, int(env.get("RESUME_FROM_AD_INDEX", "1") or "1"))
-    default_resume_adset = ((saved_resume_index - 1) // creatives_per_adset_for_resume) + 1
-    default_resume_local_ad = ((saved_resume_index - 1) % creatives_per_adset_for_resume) + 1
-    resume_col1, resume_col2, resume_col3 = st.columns(3)
-    with resume_col1:
-        resume_from_adset_input = st.number_input(
-            "실패한 광고세트 번호",
-            min_value=1,
-            max_value=100,
-            value=default_resume_adset,
-            disabled=not resume_mode_enabled,
-            help="예: 3번 광고세트에서 멈췄다면 3을 입력합니다.",
-        )
-    with resume_col2:
-        resume_from_local_ad_input = st.number_input(
-            "광고세트 안 광고 번호",
-            min_value=1,
-            max_value=200,
-            value=default_resume_local_ad,
-            disabled=not resume_mode_enabled,
-            help="예: 그 광고세트 안의 4번째 광고에서 멈췄다면 4를 입력합니다.",
-        )
-    resume_from_ad_index_input = ((resume_from_adset_input - 1) * creatives_per_adset_for_resume) + resume_from_local_ad_input
-    with resume_col3:
-        st.metric("실제 resume ad index", resume_from_ad_index_input)
-        st.caption(f"현재 기준: 광고세트당 실제 광고 {creatives_per_adset_for_resume}개")
     resume_from_ad_name_input = st.text_input(
-        "실패한 광고명",
+        "실패한 광고명 또는 다시 시작할 광고명",
         value=env.get("RESUME_FROM_AD_NAME", ""),
         disabled=not resume_mode_enabled,
-        help="알림에 나온 광고명을 그대로 넣으면 더 정확합니다. 예: f_i_o_l_0522_2",
+        help="알림에 나온 광고명을 그대로 넣으세요. 예: f_v_b_o_l_0526_15",
     )
+    saved_resume_index = max(1, int(env.get("RESUME_FROM_AD_INDEX", "1") or "1"))
+    inferred_resume_index = saved_resume_index
+    resume_name_match = re.search(r"_(\d+)$", resume_from_ad_name_input.strip())
+    if resume_name_match:
+        inferred_resume_index = int(resume_name_match.group(1))
+    manual_resume_index = st.number_input(
+        "광고명에서 번호를 읽지 못할 때만 직접 입력",
+        min_value=1,
+        max_value=10000,
+        value=inferred_resume_index,
+        disabled=not resume_mode_enabled or bool(resume_name_match),
+        help="보통은 광고명 끝의 _15 같은 숫자를 자동으로 사용합니다.",
+    )
+    resume_from_ad_index_input = inferred_resume_index if resume_name_match else manual_resume_index
+    st.metric("실제 resume ad index", resume_from_ad_index_input)
+    st.caption("광고세트명은 선택하지 않습니다. 입력한 광고명 row를 직접 찾아서 그 지점부터 이어갑니다.")
     resume_from_ad_index = resume_from_ad_index_input if resume_mode_enabled else 1
     resume_from_ad_name = resume_from_ad_name_input if resume_mode_enabled else ""
     if not resume_mode_enabled and (env.get("RESUME_FROM_AD_NAME") or env.get("RESUME_FROM_AD_INDEX", "1") not in {"", "1"}):

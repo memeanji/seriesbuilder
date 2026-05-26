@@ -4718,6 +4718,7 @@ async function runFlow(page) {
   if (isResumeModeEnabled()) {
     const resumeStartIndex = getResumeAdCreativeStartIndex();
     const resumeTargetAdset = getPlanAdsetForCreativeIndex(resumeStartIndex);
+    const resumeByAdNameOnly = Boolean(getEffectiveResumeAdName());
     const adCreativeDuplicateCount = isBlogCampaign()
       ? Math.max((activeCampaignPlan?.totalAdsPerAdset || 5) - 1, 0)
       : ((isVideoOnlyCampaign() || isCboCampaign()) ? Math.max((activeCampaignPlan?.totalAdsPerAdset || AD_CREATIVE_COUNT + 1) - 1, 0) : Math.max(AD_CREATIVE_COUNT, 0));
@@ -4730,21 +4731,34 @@ async function runFlow(page) {
       RESUME_FROM_AD_NAME: getEffectiveResumeAdName(),
       targetAdsetName: resumeTargetAdset?.name || '',
       targetAdsetIndex: resumeTargetAdset?.index || '',
+      resumeByAdNameOnly,
       adCreativeDuplicateCount,
       adsetDuplicateCount,
     });
-    if (resumeTargetAdset?.name) {
+    if (resumeTargetAdset?.name && !resumeByAdNameOnly) {
       updateRunContext({
         current_step: 'resume_select_adset',
         current_adset_index: resumeTargetAdset.index,
         current_adset_name: resumeTargetAdset.name,
       });
       await timedStep('resume_select_adset', resumeTargetAdset.name, () => selectExistingAdsetRowByName(page, resumeTargetAdset.name));
+    } else if (resumeByAdNameOnly) {
+      updateRunContext({
+        current_step: 'resume_find_ad_by_name',
+        current_adset_index: resumeTargetAdset?.index || 0,
+        current_adset_name: resumeTargetAdset?.name || '',
+        current_ad_index: resumeStartIndex,
+        current_ad_name: getEffectiveResumeAdName(),
+      });
+      console.log('[STEP] resume by ad name only - skipping adset row select:', {
+        resumeAdName: getEffectiveResumeAdName(),
+        resumeStartIndex,
+      });
     }
     updateRunContext({ current_step: 'resume_rename_ads_and_upload_media' });
     await timedStep('resume_rename_ads_and_upload_media', getEffectiveResumeAdName() || `ad_${resumeStartIndex}`, () => renameAdsetsAndAdsSequentially(page, (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount, {
       resumeOnly: true,
-      resumeTargetAdsetName: resumeTargetAdset?.name || '',
+      resumeTargetAdsetName: resumeByAdNameOnly ? '' : (resumeTargetAdset?.name || ''),
     }));
     updateRunContext({ current_step: 'success' });
     return;
