@@ -141,6 +141,20 @@ async function createKoreanBlogAssets(root, adsetCount = 2, imageCount = 4, incl
   }
 }
 
+async function createExactNamedBlogAssets(root, adsetCount = 2, imageCount = 2, includeVideo = true) {
+  for (let adsetIndex = 1; adsetIndex <= adsetCount; adsetIndex += 1) {
+    const adsetDir = path.join(root, 'assets', 'blog', `0520 ${adsetIndex}번 광고세트-소재 통합 폴더`);
+    await fs.mkdir(adsetDir, { recursive: true });
+    const baseIndex = (adsetIndex - 1) * (imageCount + (includeVideo ? 1 : 0));
+    for (let imageIndex = 1; imageIndex <= imageCount; imageIndex += 1) {
+      await fs.writeFile(path.join(adsetDir, `f_i_b_o_l_0520_${baseIndex + imageIndex}.jpg`), '');
+    }
+    if (includeVideo) {
+      await fs.writeFile(path.join(adsetDir, `f_v_b_o_l_0520_${baseIndex + imageCount + 1}.mp4`), '');
+    }
+  }
+}
+
 function blogEnv(root, overrides = {}) {
   return {
     CAMPAIGN_MODE: 'BLOG_MIXED',
@@ -245,6 +259,23 @@ test('BLOG_ASSET_ROOT detects Korean adset folders with mixed media in one folde
   assert.equal(plan.adsets[0].imageAssets.length, 4);
   assert.match(plan.adsets[0].videoAsset, /video1\.mp4$/);
   assert.match(plan.adsets[1].imageAssets[0], /0520 2번 광고세트/);
+});
+
+test('BLOG_MIXED exact mode matches assets by generated ad names inside each adset folder', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-exact-plan-'));
+  await createExactNamedBlogAssets(root, 2, 2);
+  const env = blogEnv(root, {
+    ADSET_COUNT: '2',
+    AD_CREATIVE_COUNT: '2',
+    BLOG_ASSET_ROOT: './assets/blog',
+    BLOG_ASSET_MATCH_MODE: 'exact',
+  });
+  const plan = await buildBlogMixedPlan(env, { baseDir: root, date: fixedDate, mmdd: '0520' });
+  assert.match(plan.adsets[0].ads[0].assetPath, /f_i_b_o_l_0520_1\.jpg$/);
+  assert.match(plan.adsets[0].ads[1].assetPath, /f_i_b_o_l_0520_2\.jpg$/);
+  assert.match(plan.adsets[0].ads[2].assetPath, /f_v_b_o_l_0520_3\.mp4$/);
+  assert.match(plan.adsets[1].ads[0].assetPath, /f_i_b_o_l_0520_4\.jpg$/);
+  assert.match(plan.adsets[1].ads[2].assetPath, /f_v_b_o_l_0520_6\.mp4$/);
 });
 
 test('IMAGE_ONLY LEGACY mode validation stays lightweight', async () => {

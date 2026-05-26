@@ -209,6 +209,7 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
                 f"BLOG_VIDEO_AD_NAME_PREFIX={'f_v_o_l' if is_blog_video and mode == 'BLOG_VIDEO_DIRECT' else 'f_v_b_o_l'}",
                 f"AD_FORMAT={'video' if is_blog_video else 'image'}",
                 "DATE_FORMAT=MMDD",
+                "BLOG_ASSET_MATCH_MODE=exact",
                 "",
                 f"BLOG_ASSET_ROOT={values.get('BLOG_ASSET_ROOT', '')}",
                 "",
@@ -1102,6 +1103,7 @@ if campaign_mode in {"BLOG_MIXED", "BLOG_VIDEO", "BLOG_VIDEO_DIRECT"}:
     next_env["BLOG_ASSET_ROOT"] = str(first_adset.get("videoFolder") or first_adset.get("imageFolder") or "")
     next_env["BLOG_ADSET_NAME_TEMPLATE"] = naming_adset_template
     next_env["DATE_FORMAT"] = "MMDD"
+    next_env["BLOG_ASSET_MATCH_MODE"] = "exact"
     next_env["BLOG_IMAGE_AD_NAME_PREFIX"] = "f_i_b_o_l"
     next_env["BLOG_VIDEO_AD_NAME_PREFIX"] = "f_v_o_l" if campaign_mode == "BLOG_VIDEO_DIRECT" else "f_v_b_o_l"
     for item in adsets:

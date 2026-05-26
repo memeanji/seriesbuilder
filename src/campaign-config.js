@@ -424,13 +424,18 @@ async function findBlogAdsetFolderFromRoot(rootPath, adsetIndex, options = {}) {
     .map((entry) => ({
       name: entry.name,
       fullPath: path.join(rootPath, entry.name),
-    }));
+    }))
+    .sort((a, b) => naturalCompare(a.name, b.name));
 
   const preferred = directories.find((entry) => entry.name.startsWith(preferredPrefix));
   if (preferred) return preferred.fullPath;
 
   const fallback = directories.find((entry) => entry.name.includes(fallbackToken));
-  return fallback?.fullPath || '';
+  if (fallback) return fallback.fullPath;
+
+  const loosePattern = new RegExp(`(^|\\D)${adsetIndex}\\s*번\\s*광고\\s*세트`, 'i');
+  const loose = directories.find((entry) => loosePattern.test(entry.name));
+  return loose?.fullPath || '';
 }
 
 async function findVideoOnlyAssetRoot(rootPath, options = {}) {
@@ -477,6 +482,33 @@ function findVideoAssetByAdName(assets, adName) {
     const stem = path.basename(assetPath).replace(/\.[^.]+$/, '');
     return normalizeAssetStem(stem) === normalizedAdName;
   }) || '';
+}
+
+function findAssetByAdName(assets, adName) {
+  const normalizedAdName = normalizeAssetStem(adName);
+  return assets.find((assetPath) => {
+    const stem = path.basename(assetPath).replace(/\.[^.]+$/, '');
+    return normalizeAssetStem(stem) === normalizedAdName;
+  }) || '';
+}
+
+function shouldRequireExactBlogAssetNames(env = process.env) {
+  return String(env.BLOG_ASSET_MATCH_MODE || env.BLOG_REQUIRE_EXACT_ASSET_NAMES || 'legacy')
+    .trim()
+    .toLowerCase() !== 'legacy';
+}
+
+function resolveBlogAssetForAdName(assets, adName, fallbackAsset, kind, adsetIndex, env = process.env) {
+  const exactAsset = findAssetByAdName(assets, adName);
+  if (exactAsset) return exactAsset;
+  if (!shouldRequireExactBlogAssetNames(env) && fallbackAsset) return fallbackAsset;
+
+  const extensions = kind === 'video'
+    ? ['.mp4', '.mov', '.m4v', '.webm']
+    : ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+  throw new Error(
+    `BLOG_${kind.toUpperCase()} asset not found for ad name: ${adName} in adset ${adsetIndex}. Expected one of: ${extensions.map((ext) => `${adName}${ext}`).join(', ')}`,
+  );
 }
 
 async function resolveBlogAssetDir(adsetIndex, env, options, kind) {
@@ -626,8 +658,9 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
       ? await getBlogVideoAssetsForAdset(adsetIndex, totalAdsPerAdset, env, { baseDir })
       : await getVideoAssetsForAdset(adsetIndex, env, { baseDir });
     const videoAsset = videoAssets[0] || '';
+    const exactBlogAssetNames = shouldRequireExactBlogAssetNames(env);
 
-    if (!isBlogVideo && imageAssets.length !== imageAdsPerAdset) {
+    if (!exactBlogAssetNames && !isBlogVideo && imageAssets.length !== imageAdsPerAdset) {
       throw new Error(`BLOG_MIXED requires exactly ${imageAdsPerAdset} image assets for adset ${adsetIndex}. Found ${imageAssets.length}.`);
     }
 
@@ -641,7 +674,7 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
       }
     }
 
-    if (videoAssets.length !== videoAdsPerAdset) {
+    if (!exactBlogAssetNames && videoAssets.length !== videoAdsPerAdset) {
       const videoAssetLabel = videoAdsPerAdset === 1 ? 'video asset' : 'video assets';
       throw new Error(`${isBlogVideo ? 'BLOG_VIDEO' : 'BLOG_MIXED'} requires exactly ${videoAdsPerAdset} ${videoAssetLabel} for adset ${adsetIndex}. Found ${videoAssets.length}.`);
     }
@@ -667,15 +700,23 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
           adset_name: adsetName,
         })
         : defaultImageAdName;
+      const imageAsset = resolveBlogAssetForAdName(
+        imageAssets,
+        imageAdName,
+        imageAssets[imageIndex - 1],
+        'image',
+        adsetIndex,
+        env,
+      );
       ads.push({
         type: 'image',
         index: globalAdIndex,
         adsetLocalIndex: imageIndex,
         name: imageAdName,
-        assetPath: imageAssets[imageIndex - 1],
+        assetPath: imageAsset,
         landingUrl,
         creativePayload: buildImageCreativePayload({
-          imageAsset: imageAssets[imageIndex - 1],
+          imageAsset,
           landingUrl,
         }),
       });
@@ -683,7 +724,6 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
 
     for (let videoIndex = 1; videoIndex <= videoAdsPerAdset; videoIndex += 1) {
       const videoAdIndex = adIndexBase + imageAdsPerAdset + videoIndex;
-      const currentVideoAsset = videoAssets[videoIndex - 1];
       const defaultVideoAdName = buildBlogVideoAdName(videoAdIndex, env, date);
       const videoAdName = (env.NAMING_AD_TEMPLATE && isBlogVideo)
         ? renderNameTemplate(env.NAMING_AD_TEMPLATE, {
@@ -693,6 +733,14 @@ export async function buildBlogMixedPlan(env = process.env, options = {}) {
           adset_name: adsetName,
         })
         : defaultVideoAdName;
+      const currentVideoAsset = resolveBlogAssetForAdName(
+        videoAssets,
+        videoAdName,
+        videoAssets[videoIndex - 1],
+        'video',
+        adsetIndex,
+        env,
+      );
       const videoLandingUrl = isBlogVideoDirect ? getVideoOnlyLandingUrl(videoAdName, env) : landingUrl;
       ads.push({
         type: 'video',
