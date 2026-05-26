@@ -2728,7 +2728,7 @@ async function selectCreativeAdModeWithRequestedClasses(page, adFormat = AD_FORM
 }
 
 function getCreativeSettingsEntryLocator(page) {
-  const settingsPattern = /크리에이티브\s*설정|미디어\s*설정|Creative\s*settings|Media\s*settings/i;
+  const settingsPattern = /크리에이티브\s*설정|미디어\s*(설정|선택)|Creative\s*settings|Media\s*(settings|selection|select)/i;
   return page
     .locator('div.x78zum5.xdt5ytf.x2lwn1j.xeuugli.xkh2ocl')
     .filter({ hasText: settingsPattern })
@@ -2759,7 +2759,7 @@ async function clickCreativeSettingsEntry(page, attempt = 1) {
 
   const domResult = await page.evaluate(() => {
     const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
-    const pattern = /크리에이티브\s*설정|미디어\s*설정|Creative\s*settings|Media\s*settings/i;
+    const pattern = /크리에이티브\s*설정|미디어\s*(설정|선택)|Creative\s*settings|Media\s*(settings|selection|select)/i;
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
