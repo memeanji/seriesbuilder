@@ -259,7 +259,7 @@ function isRecoverableAutomationError(error) {
   if (/requires exactly|must be|asset root does not exist|file not found|Video file not found|Image file not found|CAMPAIGN_NAME|안전 제한|검증/i.test(message)) {
     return false;
   }
-  return /Timeout|timed out|찾지 못했습니다|Could not find|button not found|not visible|row not found|Resume target|upload completion|upload timeout|업로드|intercepts pointer events|Sequential adset\/ad rename failed|Next button|Done button|Continue button|다음|계속|완료|업로드/i.test(message);
+  return /Timeout|timed out|찾지 못했습니다|Could not find|button not found|not visible|row not found|Resume target|Resume editor tree|upload completion|upload timeout|업로드|intercepts pointer events|Sequential adset\/ad rename failed|Next button|Done button|Continue button|다음|계속|완료|업로드/i.test(message);
 }
 
 function activateRuntimeResumeFromContext(error, attempt) {
@@ -2575,6 +2575,84 @@ async function isDisabledLike(locator) {
   ));
 }
 
+async function clickDashboardEditorEntry(page, label = 'resume') {
+  const clicked = await page.evaluate((targetLabel) => {
+    const visible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none';
+    };
+    const score = (el) => {
+      const text = (el.textContent || '').trim();
+      const aria = el.getAttribute('aria-label') || '';
+      const title = el.getAttribute('title') || '';
+      const tooltip = el.getAttribute('data-tooltip-content') || '';
+      const combined = `${text} ${aria} ${title} ${tooltip}`;
+      let value = 0;
+      if (/^(수정|Edit)$/i.test(text)) value += 1000;
+      if (/수정|Edit/i.test(aria)) value += 800;
+      if (/수정|Edit/i.test(title)) value += 600;
+      if (/수정|Edit/i.test(tooltip)) value += 600;
+      if (el.getAttribute('role') === 'button' || el.tagName === 'BUTTON') value += 200;
+      if (/삭제|Delete|닫기|Close|만들기|Create/i.test(combined)) value -= 1000;
+      return value;
+    };
+
+    const candidates = [...document.querySelectorAll('button, [role="button"], [aria-label], [title], [data-tooltip-content], div, span')]
+      .filter(visible)
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          el,
+          score: score(el),
+          text: (el.textContent || '').trim().slice(0, 80),
+          aria: el.getAttribute('aria-label') || '',
+          title: el.getAttribute('title') || '',
+          tooltip: el.getAttribute('data-tooltip-content') || '',
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        };
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score || a.y - b.y);
+
+    const best = candidates[0];
+    if (!best) return { ok: false, reason: 'no edit-like candidate', targetLabel };
+    best.el.click();
+    return {
+      ok: true,
+      targetLabel,
+      score: best.score,
+      text: best.text,
+      aria: best.aria,
+      title: best.title,
+      tooltip: best.tooltip,
+      box: { x: best.x, y: best.y, width: best.width, height: best.height },
+    };
+  }, label).catch((error) => ({ ok: false, error: error.message, targetLabel: label }));
+  console.log('[DEBUG] dashboard editor entry click result:', clicked);
+  return Boolean(clicked?.ok);
+}
+
+async function clickDashboardTargetRow(page, label = 'resume') {
+  if (!label) return false;
+  const locator = page.getByText(label, { exact: true }).first();
+  const visible = await locator.isVisible({ timeout: 1200 }).catch(() => false);
+  if (!visible) return false;
+  console.log('[STEP] resume dashboard target row click:', { label });
+  await locator.scrollIntoViewIfNeeded().catch(() => null);
+  await locator.click({ force: true }).catch(() => null);
+  await page.waitForTimeout(1200);
+  await locator.dblclick({ force: true }).catch(() => null);
+  return true;
+}
+
 async function ensureCampaignEditorOpenForResume(page, label = 'resume') {
   const ready = await isCampaignEditorTreeReady(page);
   if (ready.ok) {
@@ -2593,10 +2671,17 @@ async function ensureCampaignEditorOpenForResume(page, label = 'resume') {
     page.getByRole('button', { name: /^Edit$/i }).first(),
     page.locator('[role="button"], button').filter({ hasText: /^수정$/ }).first(),
     page.locator('[role="button"], button').filter({ hasText: /^Edit$/i }).first(),
+    page.locator('[aria-label*="수정"], [title*="수정"], [data-tooltip-content*="수정"]').first(),
+    page.locator('[aria-label*="Edit" i], [title*="Edit" i], [data-tooltip-content*="Edit" i]').first(),
+    page.getByText(/^수정$/).first(),
+    page.getByText(/^Edit$/i).first(),
     page.getByText(/^수정$/).locator('xpath=ancestor-or-self::*[@role="button" or self::button][1]').first(),
   ];
 
-  for (let attempt = 1; attempt <= 6; attempt += 1) {
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    if (attempt === 1 || attempt === 5 || attempt === 9) {
+      await clickDashboardTargetRow(page, label).catch(() => false);
+    }
     for (const locator of editLocators) {
       const visible = await locator.isVisible({ timeout: 1200 }).catch(() => false);
       if (!visible) continue;
@@ -2614,6 +2699,16 @@ async function ensureCampaignEditorOpenForResume(page, label = 'resume') {
       }
     }
 
+    const clickedDashboardEdit = await clickDashboardEditorEntry(page, label);
+    if (clickedDashboardEdit) {
+      await page.waitForTimeout(attempt <= 4 ? 3000 : 6000);
+      const afterDashboardEdit = await isCampaignEditorTreeReady(page);
+      if (afterDashboardEdit.ok) {
+        console.log('[STEP] resume editor tree reopened from dashboard edit:', afterDashboardEdit);
+        return true;
+      }
+    }
+
     const opened = await page.getByText(/^열기$/).first().isVisible({ timeout: 1000 }).catch(() => false);
     if (opened) {
       console.log('[STEP] resume editor reopen - clicking open button:', { attempt, label });
@@ -2624,6 +2719,18 @@ async function ensureCampaignEditorOpenForResume(page, label = 'resume') {
     if (afterWait.ok) {
       console.log('[STEP] resume editor tree ready after wait:', afterWait);
       return true;
+    }
+
+    if (attempt === 6) {
+      console.log('[STEP] resume editor reopen - refreshing campaign list once before continuing:', { label });
+      await ensureCampaignTab(page).catch((error) => console.warn('[WARN] resume force campaign tab failed:', error.message));
+      await trySearchBox(page, CAMPAIGN_NAME).catch((error) => console.warn('[WARN] resume campaign search failed:', error.message));
+      const campaignTarget = await findCampaignTarget(page, CAMPAIGN_NAME).catch(() => null);
+      if (campaignTarget) {
+        await campaignTarget.click().catch(() => null);
+        await page.waitForLoadState('domcontentloaded').catch(() => null);
+        await page.waitForTimeout(3000);
+      }
     }
   }
 
