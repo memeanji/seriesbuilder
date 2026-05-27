@@ -5006,7 +5006,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         continue;
       }
 
-      if (isAdStructureRow && hasPlannedAdName && !isAdRowCopy && !isCurrentTargetAdRow) {
+      const shouldUseStrictAlreadyNamedAdSkip = !(isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign());
+      if (shouldUseStrictAlreadyNamedAdSkip && isAdStructureRow && hasPlannedAdName && !isAdRowCopy && !isCurrentTargetAdRow) {
         processedAdRows.add(rowKey);
         console.log('[DEBUG] already named ad row skipped:', { rowKey, rowText: rowText.slice(0, 120) });
         continue;
@@ -5118,7 +5119,11 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         continue;
       }
 
-      if (isAdCopy && adCreativeIndex <= maxCreativeTotal) {
+      const shouldTryAdRowByInput = isAdStructureRow &&
+        (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) &&
+        adCreativeIndex <= maxCreativeTotal;
+
+      if ((isAdCopy || shouldTryAdRowByInput) && adCreativeIndex <= maxCreativeTotal) {
         const adNameCell = await row
           .$('[id^="default-button-for-action-menu_"], span._3dfi._3dfj')
           .catch(() => null);
