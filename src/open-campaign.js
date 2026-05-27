@@ -3295,11 +3295,12 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
   });
 
   if (explicitFiles?.length) {
-    if (!(await isOneMediaSelected(page))) {
-      console.log('[STEP] uploaded media is not selected yet - clicking exact visible media only:', { targetAdName, adFormat });
+    if (!(await isExactMediaSelected(page, targetAdName))) {
+      console.log('[STEP] exact uploaded media is not selected yet - clearing stale selections and clicking exact media:', { targetAdName, adFormat });
+      await clearSelectedMediaSelections(page, targetAdName);
       const exactSelected = await clickVisibleMediaImageOnce(page, targetAdName, { requireExact: true });
-      if (!exactSelected) {
-        throw new Error(`Uploaded ${adFormat} was not selected and exact visible media was not found: ${targetAdName}`);
+      if (!exactSelected || !(await isExactMediaSelected(page, targetAdName))) {
+        throw new Error(`Uploaded ${adFormat} was not selected with exact media name: ${targetAdName}`);
       }
     }
     await completeMediaPickerNextAndOriginalFlow(page, adFormat);
@@ -3638,6 +3639,67 @@ async function isOneMediaSelected(page) {
     .or(page.getByText(/1\s*개\s*선택됨/).first());
 
   return selectedLabel.isVisible({ timeout: 1000 }).catch(() => false);
+}
+
+async function isExactMediaSelected(page, targetAdName) {
+  return page.evaluate((target) => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, '').toLowerCase();
+    const normalizedTarget = normalize(target);
+    const isVisible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none';
+    };
+    const collectValues = (root) => {
+      const values = [];
+      let node = root;
+      for (let depth = 0; node && depth < 8; depth += 1) {
+        values.push(node.textContent);
+        for (const attr of ['aria-label', 'aria-labelledby', 'aria-describedby', 'title', 'alt', 'data-tooltip-content', 'cachekey']) {
+          const value = node.getAttribute?.(attr);
+          if (value) values.push(value);
+          if ((attr === 'aria-labelledby' || attr === 'aria-describedby') && value) {
+            for (const id of value.split(/\s+/)) {
+              const ref = node.ownerDocument.getElementById(id);
+              if (ref) values.push(ref.textContent, ref.getAttribute('aria-label'), ref.getAttribute('title'));
+            }
+          }
+        }
+        for (const child of node.querySelectorAll?.('[aria-label], [aria-labelledby], [aria-describedby], [title], [alt], [data-tooltip-content], img, span') || []) {
+          values.push(child.textContent);
+          for (const attr of ['aria-label', 'aria-labelledby', 'aria-describedby', 'title', 'alt', 'data-tooltip-content', 'cachekey']) {
+            const value = child.getAttribute?.(attr);
+            if (value) values.push(value);
+          }
+        }
+        node = node.parentElement;
+      }
+      return values.filter(Boolean).map(normalize);
+    };
+
+    const selected = [...document.querySelectorAll('[role="checkbox"][aria-checked="true"], input[type="checkbox"]:checked, [aria-selected="true"]')]
+      .filter(isVisible);
+    return selected.some((el) => collectValues(el).some((value) => value === normalizedTarget || value.includes(normalizedTarget)));
+  }, targetAdName).catch(() => false);
+}
+
+async function clearSelectedMediaSelections(page, targetAdName) {
+  const selected = await page.locator('[role="checkbox"][aria-checked="true"], input[type="checkbox"]:checked, [aria-selected="true"]').elementHandles().catch(() => []);
+  console.log('[DEBUG] clearing stale media selections:', { targetAdName, count: selected.length });
+  for (const element of selected) {
+    const visible = await element.isVisible().catch(() => false);
+    if (!visible) continue;
+    const box = await element.boundingBox().catch(() => null);
+    if (!box) continue;
+    await element.click({ force: true }).catch(async () => {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    });
+    await page.waitForTimeout(800);
+  }
 }
 
 async function clickVisibleMediaImageOnce(page, targetAdName, options = {}) {
@@ -4769,6 +4831,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const currentVideoCboAdPlan = isVideoOnlyCboCampaign() ? getVideoOnlyCboAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
       const currentImageCboAdPlan = isImageOnlyCboCampaign() ? getImageOnlyCboAdPlanBySequence(activeCampaignPlan, adCreativeIndex) : null;
       const currentTargetPlan = currentBlogAdPlan || currentVideoAdPlan || currentVideoCboAdPlan || currentImageCboAdPlan;
+      const currentTargetPlanAdsetIndex = Number(currentTargetPlan?.adsetIndex || 0);
       const currentTargetAdName = normalizeText(currentTargetPlan?.name || getAdName(adCreativeIndex));
       const isCurrentTargetAdRow = isAdStructureRow && currentTargetAdName && normalizedRowText.includes(currentTargetAdName);
       const isAdCopy = isAdStructureRow && (isDefaultAdRow || isAdRowCopy || !hasPlannedAdName || isCurrentTargetAdRow);
@@ -4927,6 +4990,23 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           targetAdsetName,
           rowText: rowText.slice(0, 160),
           rowMeta,
+        });
+        continue;
+      }
+
+      if (
+        isAdStructureRow &&
+        !resumeOnly &&
+        currentTargetPlanAdsetIndex > 0 &&
+        adsetIndex <= currentTargetPlanAdsetIndex &&
+        adsetIndex <= adsetEndIndex
+      ) {
+        console.log('[DEBUG] ad row deferred until its adset name is handled:', {
+          adCreativeIndex,
+          currentTargetPlanAdsetIndex,
+          currentTargetAdName: currentTargetPlan?.name || getAdName(adCreativeIndex),
+          currentAdsetRenameIndex: adsetIndex,
+          rowText: rowText.slice(0, 140),
         });
         continue;
       }
