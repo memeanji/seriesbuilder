@@ -498,6 +498,18 @@ function findAssetByAdName(assets, adName) {
   }) || '';
 }
 
+function getBlogAssetNameAliases(adName, kind, env = process.env) {
+  if (kind !== 'video') return [adName];
+  const mode = normalizeCampaignMode(env.CAMPAIGN_MODE);
+  if (mode !== CAMPAIGN_MODES.BLOG_VIDEO_DIRECT) return [adName];
+
+  const aliases = [adName];
+  const value = String(adName || '');
+  if (/^f_v_o_l_/i.test(value)) aliases.push(value.replace(/^f_v_o_l_/i, 'f_v_b_o_l_'));
+  if (/^f_v_b_o_l_/i.test(value)) aliases.push(value.replace(/^f_v_b_o_l_/i, 'f_v_o_l_'));
+  return [...new Set(aliases)];
+}
+
 function shouldRequireExactBlogAssetNames(env = process.env) {
   return String(env.BLOG_ASSET_MATCH_MODE || env.BLOG_REQUIRE_EXACT_ASSET_NAMES || 'legacy')
     .trim()
@@ -505,15 +517,19 @@ function shouldRequireExactBlogAssetNames(env = process.env) {
 }
 
 function resolveBlogAssetForAdName(assets, adName, fallbackAsset, kind, adsetIndex, env = process.env) {
-  const exactAsset = findAssetByAdName(assets, adName);
-  if (exactAsset) return exactAsset;
+  const aliases = getBlogAssetNameAliases(adName, kind, env);
+  for (const alias of aliases) {
+    const exactAsset = findAssetByAdName(assets, alias);
+    if (exactAsset) return exactAsset;
+  }
   if (!shouldRequireExactBlogAssetNames(env) && fallbackAsset) return fallbackAsset;
 
   const extensions = kind === 'video'
     ? ['.mp4', '.mov', '.m4v', '.webm']
     : ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+  const expectedNames = aliases.flatMap((alias) => extensions.map((ext) => `${alias}${ext}`));
   throw new Error(
-    `BLOG_${kind.toUpperCase()} asset not found for ad name: ${adName} in adset ${adsetIndex}. Expected one of: ${extensions.map((ext) => `${adName}${ext}`).join(', ')}`,
+    `BLOG_${kind.toUpperCase()} asset not found for ad name: ${adName} in adset ${adsetIndex}. Expected one of: ${expectedNames.join(', ')}`,
   );
 }
 

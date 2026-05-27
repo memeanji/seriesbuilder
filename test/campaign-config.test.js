@@ -675,6 +675,24 @@ test('BLOG_VIDEO_DIRECT generates landing URLs from f_v_o_l ad names', async () 
   );
 });
 
+test('BLOG_VIDEO_DIRECT accepts f_v_b_o_l video asset filenames in exact mode', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'blog-video-direct-asset-alias-'));
+  await createFlatBlogVideoAssets(root, 2);
+  const plan = await buildBlogMixedPlan(blogEnv(root, {
+    CAMPAIGN_MODE: 'BLOG_VIDEO_DIRECT',
+    ADSET_COUNT: '2',
+    AD_CREATIVE_COUNT: '0',
+    BLOG_IMAGE_ADS_PER_ADSET: '0',
+    BLOG_VIDEO_ADS_PER_ADSET: '1',
+    BLOG_TOTAL_ADS_PER_ADSET: '1',
+    BLOG_ASSET_MATCH_MODE: 'exact',
+  }), { baseDir: root, date: fixedDate });
+
+  assert.equal(plan.adsets[0].ads[0].name, 'f_v_o_l_0520_1');
+  assert.equal(path.basename(plan.adsets[0].ads[0].assetPath), 'f_v_b_o_l_0520_1.mp4');
+  assert.equal(path.basename(plan.adsets[1].ads[0].assetPath), 'f_v_b_o_l_0520_2.mp4');
+});
+
 test('VIDEO_ONLY naming and landing URL use MMDD ad index', () => {
   const env = {
     CAMPAIGN_MODE: 'VIDEO_ONLY',
