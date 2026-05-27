@@ -259,7 +259,7 @@ function isRecoverableAutomationError(error) {
   if (/requires exactly|must be|asset root does not exist|file not found|Video file not found|Image file not found|CAMPAIGN_NAME|안전 제한|검증/i.test(message)) {
     return false;
   }
-  return /Timeout|timed out|찾지 못했습니다|Could not find|button not found|not visible|upload completion|upload timeout|업로드|intercepts pointer events|Next button|Done button|Continue button|다음|계속|완료|업로드/i.test(message);
+  return /Timeout|timed out|찾지 못했습니다|Could not find|button not found|not visible|row not found|Resume target|upload completion|upload timeout|업로드|intercepts pointer events|Sequential adset\/ad rename failed|Next button|Done button|Continue button|다음|계속|완료|업로드/i.test(message);
 }
 
 function activateRuntimeResumeFromContext(error, attempt) {
@@ -2463,6 +2463,168 @@ async function selectExistingAdsetRowByName(page, adsetName) {
 
   await debugDump(page, `resume target adset not found: ${adsetName}`);
   throw new Error(`Resume target adset row not found: ${adsetName}`);
+}
+
+async function isCampaignEditorTreeReady(page) {
+  return page.evaluate(() => {
+    const isVisible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none';
+    };
+    const root = document.querySelector('#campaign_structure_tree_root');
+    if (isVisible(root)) return { ok: true, source: 'campaign_structure_tree_root' };
+    const editorNode = [...document.querySelectorAll('[data-surface*="editor_tree"], [id^="ads_campaign_structure_item_"]')]
+      .find((el) => isVisible(el) && /광고|adset|adgroup|campaign/i.test(el.textContent || el.getAttribute('aria-label') || ''));
+    if (editorNode) {
+      return {
+        ok: true,
+        source: editorNode.id || editorNode.getAttribute('data-surface') || editorNode.getAttribute('aria-label') || 'editor_tree_fallback',
+      };
+    }
+    return { ok: false, source: '' };
+  }).catch(() => ({ ok: false, source: '' }));
+}
+
+async function isDisabledLike(locator) {
+  return locator.evaluate((el) => (
+    el.getAttribute('aria-disabled') === 'true' ||
+    el.getAttribute('aria-busy') === 'true' ||
+    el.hasAttribute('disabled') ||
+    Boolean(el.closest('[aria-disabled="true"], [aria-busy="true"]'))
+  ));
+}
+
+async function ensureCampaignEditorOpenForResume(page, label = 'resume') {
+  const ready = await isCampaignEditorTreeReady(page);
+  if (ready.ok) {
+    console.log('[STEP] resume editor tree already ready:', ready);
+    return true;
+  }
+
+  console.warn('[WARN] resume editor tree not visible - attempting to reopen editor:', {
+    label,
+    url: page.url(),
+    title: await page.title().catch(() => ''),
+  });
+
+  const editLocators = [
+    page.getByRole('button', { name: /^수정$/ }).first(),
+    page.getByRole('button', { name: /^Edit$/i }).first(),
+    page.locator('[role="button"], button').filter({ hasText: /^수정$/ }).first(),
+    page.locator('[role="button"], button').filter({ hasText: /^Edit$/i }).first(),
+    page.getByText(/^수정$/).locator('xpath=ancestor-or-self::*[@role="button" or self::button][1]').first(),
+  ];
+
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    for (const locator of editLocators) {
+      const visible = await locator.isVisible({ timeout: 1200 }).catch(() => false);
+      if (!visible) continue;
+      const disabled = await isDisabledLike(locator).catch(() => false);
+      if (disabled) continue;
+      console.log('[STEP] resume editor reopen - clicking edit button:', { attempt, label });
+      await locator.click({ force: true, timeout: 8000 }).catch(async (error) => {
+        console.warn('[WARN] resume edit button click failed:', error.message);
+      });
+      await page.waitForTimeout(attempt <= 2 ? 3000 : 6000);
+      const afterClick = await isCampaignEditorTreeReady(page);
+      if (afterClick.ok) {
+        console.log('[STEP] resume editor tree reopened:', afterClick);
+        return true;
+      }
+    }
+
+    const opened = await page.getByText(/^열기$/).first().isVisible({ timeout: 1000 }).catch(() => false);
+    if (opened) {
+      console.log('[STEP] resume editor reopen - clicking open button:', { attempt, label });
+      await page.getByText(/^열기$/).first().click({ force: true }).catch(() => null);
+    }
+    await page.waitForTimeout(attempt <= 3 ? 2500 : 5000);
+    const afterWait = await isCampaignEditorTreeReady(page);
+    if (afterWait.ok) {
+      console.log('[STEP] resume editor tree ready after wait:', afterWait);
+      return true;
+    }
+  }
+
+  await debugDump(page, `resume editor tree reopen failed: ${label}`);
+  throw new Error(`Resume editor tree not available: ${label}`);
+}
+
+async function selectExistingAdRowByName(page, adName) {
+  if (!adName) return false;
+  console.log('[STEP] resume target ad row select:', { adName });
+  await ensureCampaignEditorOpenForResume(page, adName);
+
+  for (let attempt = 1; attempt <= 30; attempt += 1) {
+    const candidateHandle = await page.evaluateHandle((name) => {
+      const normalize = (value) => String(value || '').replace(/\s+/g, '').toLowerCase();
+      const target = normalize(name);
+      const isVisible = (el) => {
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 &&
+          rect.height > 0 &&
+          style.visibility !== 'hidden' &&
+          style.display !== 'none';
+      };
+      const rows = [...document.querySelectorAll('[role="row"], [role="rowheader"], [id^="ads_campaign_structure_item_"]')];
+      const candidates = rows
+        .map((el) => {
+          const text = (el.innerText || el.textContent || '').trim();
+          const rowHeader = el.matches?.('[role="rowheader"]') ? el : el.querySelector?.('[role="rowheader"]');
+          const aria = el.getAttribute('aria-label') || rowHeader?.getAttribute('aria-label') || '';
+          const surface = el.closest?.('[data-surface]')?.getAttribute('data-surface') || el.querySelector?.('[data-surface]')?.getAttribute('data-surface') || '';
+          const normalizedText = normalize(text);
+          const normalizedAria = normalize(aria);
+          const isAd = normalizedAria === '광고' ||
+            normalizedAria.includes('ad') ||
+            /editor_tree:ad(\/|$)/.test(surface) ||
+            surface.includes('editor_tree:ad/lib:');
+          const isAdset = normalizedAria.includes('광고세트') ||
+            normalizedAria.includes('adset') ||
+            surface.includes('editor_tree:adset') ||
+            normalizedText.includes('광고세트');
+          const exact = normalizedText === target || normalizedText.includes(target);
+          const rect = el.getBoundingClientRect();
+          return { el, text, aria, surface, isAd, isAdset, exact, y: rect.y, width: rect.width, height: rect.height };
+        })
+        .filter((item) => item.isAd && !item.isAdset && item.exact && item.width > 0 && item.height > 0 && isVisible(item.el))
+        .sort((a, b) => a.y - b.y);
+      return candidates[0]?.el || null;
+    }, adName).catch(() => null);
+    const candidate = candidateHandle ? candidateHandle.asElement() : null;
+    if (candidate) {
+      await candidate.scrollIntoViewIfNeeded().catch(() => null);
+      const box = await candidate.boundingBox().catch(() => null);
+      const text = (await candidate.innerText().catch(() => '')).trim();
+      console.log('[DEBUG] resume target ad candidate:', { attempt, adName, text: text.slice(0, 180), box });
+      if (!box) {
+        await page.waitForTimeout(1500);
+        continue;
+      }
+      await page.mouse.click(box.x + Math.min(box.width / 2, 220), box.y + box.height / 2);
+      await page.waitForTimeout(3500);
+      console.log('[STEP] resume target ad row selected:', { adName });
+      return true;
+    }
+
+    console.log(`[WAIT] resume target ad row not visible ${attempt}/30: ${adName}`);
+    if (attempt % 8 === 0) {
+      await ensureCampaignEditorOpenForResume(page, `retry ${adName}`);
+    }
+    await scrollCampaignStructureTree(page, attempt <= 10 ? 450 : 900);
+    await page.mouse.wheel(0, attempt <= 10 ? 180 : 360).catch(() => null);
+    await page.waitForTimeout(attempt <= 10 ? 1500 : 3000);
+  }
+
+  await debugDump(page, `resume target ad not found: ${adName}`);
+  throw new Error(`Resume target ad row not found: ${adName}`);
 }
 
 
@@ -4915,10 +5077,13 @@ async function runFlow(page) {
         current_ad_index: resumeStartIndex,
         current_ad_name: getEffectiveResumeAdName(),
       });
-      console.log('[STEP] resume by ad name only - skipping adset row select:', {
+      console.log('[STEP] resume by ad name only - reopening editor and selecting exact ad row:', {
         resumeAdName: getEffectiveResumeAdName(),
         resumeStartIndex,
+        targetAdsetName: resumeTargetAdset?.name || '',
       });
+      await timedStep('resume_open_editor_tree', getEffectiveResumeAdName(), () => ensureCampaignEditorOpenForResume(page, getEffectiveResumeAdName()));
+      await timedStep('resume_select_ad_by_name', getEffectiveResumeAdName(), () => selectExistingAdRowByName(page, getEffectiveResumeAdName()));
     }
     updateRunContext({ current_step: 'resume_rename_ads_and_upload_media' });
     await timedStep('resume_rename_ads_and_upload_media', getEffectiveResumeAdName() || `ad_${resumeStartIndex}`, () => renameAdsetsAndAdsSequentially(page, (isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign()) ? 1 : ADSET_START_INDEX, adsetDuplicateCount, adCreativeDuplicateCount, {
