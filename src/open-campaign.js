@@ -2571,7 +2571,7 @@ async function selectImageAdModeWithRequestedClasses(page) {
       uploadVisible,
     });
 
-    if (surfaceVisible && (presentationVisible || uploadVisible)) {
+    if (surfaceVisible && uploadVisible) {
       console.log('[STEP] 이미지 광고 내부 진입 확인 - 업로드 버튼 단계로 이동');
       return;
     }
@@ -2698,7 +2698,7 @@ async function selectVideoAdModeWithRequestedClasses(page) {
       uploadVisible,
     });
 
-    if (surfaceVisible && (presentationVisible || uploadVisible)) {
+    if (surfaceVisible && uploadVisible) {
       console.log('[STEP] video ad internal surface confirmed');
       return;
     }

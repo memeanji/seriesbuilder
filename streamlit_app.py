@@ -37,6 +37,12 @@ NOTIFICATION_DEFAULTS = {
 }
 
 
+def profile_env_path(profile_slot: str) -> Path:
+    if profile_slot in CHROME_PROFILE_SLOTS:
+        return APP_DIR / f".env.{profile_slot}"
+    return ENV_PATH
+
+
 def env_bool(values: dict[str, str], key: str, default: str = "false") -> bool:
     return values.get(key, default).strip().lower() in {"1", "true", "yes", "y", "on"}
 
@@ -287,10 +293,14 @@ def write_env(values: dict[str, str], path: Path = ENV_PATH) -> str:
     return content
 
 
-def run_command(command: list[str], timeout: int = 300) -> tuple[int, str]:
+def run_command(command: list[str], timeout: int = 300, env_vars: dict[str, str] | None = None) -> tuple[int, str]:
+    run_env = os.environ.copy()
+    if env_vars:
+        run_env.update(env_vars)
     completed = subprocess.run(
         command,
         cwd=APP_DIR,
+        env=run_env,
         text=True,
         capture_output=True,
         timeout=timeout,
@@ -674,7 +684,12 @@ with st.expander("회사 사람들과 같이 쓰는 방법"):
         """
     )
 
-env = read_env()
+base_env = read_env()
+if "profile_slot" not in st.session_state:
+    st.session_state.profile_slot = infer_profile_slot(base_env.get("CHROME_PROFILE_DIR", DEFAULT_CHROME_PROFILE_DIR))
+active_profile_slot = st.session_state.profile_slot
+active_env_path = profile_env_path(active_profile_slot)
+env = read_env(active_env_path) or base_env
 if "resume_mode_enabled" not in st.session_state:
     st.session_state.resume_mode_enabled = False
 
@@ -725,10 +740,10 @@ with st.expander("실패 지점부터 재실행", expanded=False):
             updated_env.pop("CURRENT_STEP", None)
             updated_env.pop("CURRENT_ADSET_NAME", None)
             updated_env.pop("SUMMARY_FILE", None)
-            write_env(updated_env)
+            write_env(updated_env, active_env_path)
             st.session_state.resume_mode_enabled = True
             st.success(f"Resume point saved: {latest_resume['RESUME_FROM_AD_NAME']}")
-            st.toast("실패 지점을 .env에 저장했습니다. 새 터미널로 이어서 실행할 수 있어요.")
+            st.toast(f"실패 지점을 {active_env_path.name}에 저장했습니다. 새 터미널로 이어서 실행할 수 있어요.")
             st.rerun()
     else:
         st.caption("최근 실패 run-summary를 아직 찾지 못했습니다.")
@@ -780,18 +795,23 @@ with st.sidebar:
         code, output = run_command(command, timeout=600)
         show_command_result("npm install", command, code, output)
 
-    if st.button("Open .env in VS Code", disabled=not IS_WINDOWS):
-        subprocess.Popen(["code.cmd", str(ENV_PATH)], cwd=APP_DIR, shell=False)
-        st.info(".env open requested.")
-
     default_profile_slot = infer_profile_slot(env.get("CHROME_PROFILE_DIR", DEFAULT_CHROME_PROFILE_DIR))
     profile_options = ["profile_01", "profile_02", "profile_03", "custom"]
     profile_slot = st.selectbox(
         "Chrome profile slot",
         profile_options,
-        index=profile_options.index(default_profile_slot),
+        index=profile_options.index(st.session_state.get("profile_slot", default_profile_slot)),
+        key="profile_slot",
         help="프로필마다 별도 Chrome 프로세스와 CDP 포트를 사용합니다. profile_01=9222, profile_02=9223, profile_03=9224.",
     )
+    active_env_path = profile_env_path(profile_slot)
+    st.caption(f"Active env: `{active_env_path.name}`")
+
+    if st.button("Open profile .env in VS Code", disabled=not IS_WINDOWS):
+        if not active_env_path.exists():
+            active_env_path.write_text("", encoding="utf-8")
+        subprocess.Popen(["code.cmd", str(active_env_path)], cwd=APP_DIR, shell=False)
+        st.info(f"{active_env_path.name} open requested.")
     if profile_slot == "custom":
         chrome_profile_dir = st.text_input(
             "Chrome profile directory",
@@ -828,8 +848,8 @@ with st.sidebar:
 
     if st.button("Open automation terminal", disabled=not IS_WINDOWS):
         try:
-            start_powershell("npm run open-campaign")
-            st.info("Automation PowerShell opened with current .env. For isolated runs, use Run real automation terminal below.")
+            start_powershell(build_automation_command(active_env_path))
+            st.info(f"Automation PowerShell opened with {active_env_path.name}.")
         except Exception as exc:
             st.error(f"Automation terminal launcher is unavailable here: {exc}")
 
@@ -1226,17 +1246,17 @@ st.divider()
 col1, col2, col3 = st.columns(3)
 with col1:
     if st.button("Save .env", type="primary"):
-        saved = write_env(next_env)
-        st.success(f"Saved: {ENV_PATH}")
-        st.toast("알림 설정을 포함해 .env 저장 완료")
+        saved = write_env(next_env, active_env_path)
+        st.success(f"Saved: {active_env_path}")
+        st.toast(f"{active_env_path.name} 저장 완료")
         st.code(saved, language="dotenv")
 
 with col2:
     if st.button("Run dry-run"):
         dry_run_env = {**next_env, "DRY_RUN": "true"}
         errors = validate_form(dry_run_env) + ui_errors
-        saved = write_env(dry_run_env)
-        st.caption("Saved .env for dry-run")
+        saved = write_env(dry_run_env, active_env_path)
+        st.caption(f"Saved {active_env_path.name} for dry-run")
         st.code(saved, language="dotenv")
         if errors:
             st.error("Fix these fields before dry-run:")
@@ -1245,7 +1265,7 @@ with col2:
                 st.write(f"- {error}")
         else:
             command = ["node", "src/open-campaign.js"]
-            code, output = run_command(command, timeout=300)
+            code, output = run_command(command, timeout=300, env_vars={"DOTENV_CONFIG_PATH": str(active_env_path)})
             show_command_result("dry-run", command, code, output)
             if code == 0:
                 st.toast("Meta 광고 자동화 dry-run 완료")
@@ -1256,8 +1276,8 @@ with col3:
     if st.button("Run real automation terminal", disabled=not IS_WINDOWS):
         real_env = {**next_env, "DRY_RUN": "false"}
         errors = validate_form(real_env) + ui_errors
-        saved = write_env(real_env)
-        st.caption("Saved .env for real run")
+        saved = write_env(real_env, active_env_path)
+        st.caption(f"Saved {active_env_path.name} for real run")
         st.code(saved, language="dotenv")
         if errors:
             st.error("Fix these fields before real run:")
@@ -1278,7 +1298,8 @@ with col3:
                 st.info("Streamlit Cloud can preview settings, but real Meta automation must run on your local Windows PC.")
 
 with st.expander("Current .env", expanded=False):
-    if ENV_PATH.exists():
-        st.code(ENV_PATH.read_text(encoding="utf-8"), language="dotenv")
+    st.caption(f"Active env file: `{active_env_path}`")
+    if active_env_path.exists():
+        st.code(active_env_path.read_text(encoding="utf-8"), language="dotenv")
     else:
-        st.info(".env does not exist yet.")
+        st.info(f"{active_env_path.name} does not exist yet.")
