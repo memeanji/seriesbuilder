@@ -4549,6 +4549,52 @@ async function selectAllOriginalRadios(page) {
       await page.waitForTimeout(200);
     }
   }
+  const fallbackSelectedCount = await page.evaluate(() => {
+    const isVisible = (el) => {
+      if (!el) return false;
+      const box = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return box.width > 0 &&
+        box.height > 0 &&
+        style.visibility !== 'hidden' &&
+        style.display !== 'none';
+    };
+    const isSelected = (el) => (
+      el.checked ||
+      el.getAttribute('aria-checked') === 'true' ||
+      el.getAttribute('aria-selected') === 'true' ||
+      Boolean(el.closest('[aria-checked="true"], [aria-selected="true"]'))
+    );
+    const textOf = (el) => [
+      el.innerText,
+      el.textContent,
+      el.getAttribute?.('aria-label'),
+      el.getAttribute?.('title'),
+      el.getAttribute?.('data-tooltip-content'),
+    ].filter(Boolean).join(' ');
+    const originalPattern = /(^|\s)(원본|Original|original)(\s|$)/i;
+    const candidates = [...document.querySelectorAll('[role="radio"], [role="button"], label, input[type="radio"]')]
+      .filter((el) => isVisible(el))
+      .map((el) => {
+        const text = textOf(el);
+        let root = el;
+        for (let depth = 0; root && depth < 4 && !originalPattern.test(textOf(root)); depth += 1) {
+          root = root.parentElement;
+        }
+        return { el, root: root || el, text: `${text} ${textOf(root || el)}` };
+      })
+      .filter((item) => originalPattern.test(item.text));
+
+    let clicked = 0;
+    for (const { el, root } of candidates) {
+      const target = isVisible(root) ? root : el;
+      if (isSelected(target) || isSelected(el)) continue;
+      target.click();
+      clicked += 1;
+    }
+    return clicked;
+  }).catch(() => 0);
+  selectedCount += fallbackSelectedCount;
   console.log('[STEP] original radio selection completed:', { selectedCount });
   return selectedCount;
 }
@@ -4565,10 +4611,15 @@ async function getOriginalRadioStatus(page) {
 }
 
 async function completeFlexibleMediaPickerFlow(page, adFormat = 'image') {
-  const selectedNext = await clickMediaPickerNextButton(page, `${adFormat}-after-media-select`);
-  if (!selectedNext) {
-    await debugDump(page, `next button not found after ${adFormat} media select`);
-    throw new Error(`Could not find the Next button after selecting ${adFormat} media.`);
+  const initialSkipped = await clickOptionalMediaPickerButton(page, '건너뛰고 계속하기', `${adFormat}-after-media-select-skip`, 4000);
+  if (initialSkipped) {
+    console.log('[STEP] media picker initial skip/continue completed before crop flow:', { adFormat });
+  } else {
+    const selectedNext = await clickMediaPickerNextButton(page, `${adFormat}-after-media-select`);
+    if (!selectedNext) {
+      await debugDump(page, `next button not found after ${adFormat} media select`);
+      throw new Error(`Could not find the Next button after selecting ${adFormat} media.`);
+    }
   }
 
   for (let step = 1; step <= 7; step += 1) {
