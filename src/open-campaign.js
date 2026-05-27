@@ -5121,7 +5121,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           /광고\s*-\s*사본/.test(normalizedRowText) ||
           normalizedRowText.includes('광고명')
         );
-      const isAlreadyTargetAdset = targetAdsetName && normalizedPrimaryNameText.includes(normalizeText(targetAdsetName));
+      const isAlreadyTargetAdset = targetAdsetName && normalizedPrimaryNameText === normalizeText(targetAdsetName);
       const isDefaultAdsetRow = isAdsetStructureRow && /새\s*판매\s*광고\s*세트/.test(normalizedPrimaryNameText || normalizedRowText);
       const isAdsetCopy = isAdsetStructureRow && /사본|copy/i.test(primaryNameText || rowText);
       const isAdRowCopy = /사본|copy/i.test(rowText);
@@ -5143,8 +5143,8 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const isVideoOnlyAdsetNameRow = isVideoOnlyCampaign() && isAdsetStructureRow && /\d{4}\s+직접세팅\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
       const isVideoOnlyCboAdsetNameRow = isVideoOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
       const isImageOnlyCboAdsetNameRow = isImageOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
-      const shouldRenameAdsetRow = (isDefaultAdsetRow || isAdsetCopy || isBlogAdsetNameRow || isVideoOnlyAdsetNameRow || isVideoOnlyCboAdsetNameRow || isImageOnlyCboAdsetNameRow) && adsetIndex <= adsetEndIndex;
-      const shouldAlwaysVerifyAdsetName = isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign();
+      const shouldRenameAdsetRow = (isDefaultAdsetRow || isAdsetCopy || isBlogAdsetNameRow || isImageOnlyAdsetNameRow || isVideoOnlyAdsetNameRow || isVideoOnlyCboAdsetNameRow || isImageOnlyCboAdsetNameRow) && adsetIndex <= adsetEndIndex;
+      const shouldAlwaysVerifyAdsetName = isAdsetStructureRow && adsetIndex <= adsetEndIndex;
       const parsedAdsetIndex = isAdsetStructureRow
         ? parseAdsetIndexFromDisplayName(adsetDisplayName, effectiveCreativeCount)
         : null;
@@ -5227,7 +5227,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         continue;
       }
 
-      if (isImageOnlyAdsetNameRow && adsetIndex <= adsetEndIndex && (!parsedAdsetIndex || parsedAdsetIndex === adsetIndex)) {
+      if (!shouldAlwaysVerifyAdsetName && isImageOnlyAdsetNameRow && adsetIndex <= adsetEndIndex && (!parsedAdsetIndex || parsedAdsetIndex === adsetIndex)) {
         processedAdsetRows.add(rowKey);
         console.log('[STEP] image retarget adset name preserved:', {
           currentName: adsetDisplayName,
