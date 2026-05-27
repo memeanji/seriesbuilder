@@ -3838,6 +3838,13 @@ async function isExactMediaSelected(page, targetAdName) {
   return page.evaluate((target) => {
     const normalize = (value) => String(value || '').replace(/\s+/g, '').toLowerCase();
     const normalizedTarget = normalize(target);
+    const escapedTarget = String(target || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const exactMediaNamePattern = new RegExp(`(^|[^a-z0-9])${escapedTarget}(?:\\.(?:jpg|jpeg|png|webp|mp4|mov|m4v|webm))?($|[^a-z0-9])`, 'i');
+    const matchesExactMediaName = (value) => {
+      const raw = String(value || '');
+      const basename = raw.split(/[\\/]/).pop().replace(/\.(?:jpg|jpeg|png|webp|mp4|mov|m4v|webm)$/i, '');
+      return normalize(basename) === normalizedTarget || exactMediaNamePattern.test(raw);
+    };
     const isVisible = (el) => {
       if (!el) return false;
       const rect = el.getBoundingClientRect();
@@ -3881,7 +3888,7 @@ async function isExactMediaSelected(page, targetAdName) {
 
     const selected = [...document.querySelectorAll('[role="checkbox"][aria-checked="true"], input[type="checkbox"]:checked, [aria-selected="true"]')]
       .filter((el) => isVisible(el) && isMediaPickerSelection(el));
-    return selected.some((el) => collectValues(el).some((value) => value === normalizedTarget || value.includes(normalizedTarget)));
+    return selected.some((el) => collectValues(el).some((value) => matchesExactMediaName(value)));
   }, targetAdName).catch(() => false);
 }
 
@@ -3912,6 +3919,13 @@ async function clickVisibleMediaImageOnce(page, targetAdName, options = {}) {
   const result = await page.evaluate(({ targetAdName, requireExact }) => {
     const normalize = (value) => String(value || '').replace(/\s+/g, '').toLowerCase();
     const target = normalize(targetAdName);
+    const escapedTarget = String(targetAdName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const exactMediaNamePattern = new RegExp(`(^|[^a-z0-9])${escapedTarget}(?:\\.(?:jpg|jpeg|png|webp|mp4|mov|m4v|webm))?($|[^a-z0-9])`, 'i');
+    const matchesExactMediaName = (value) => {
+      const raw = String(value || '');
+      const basename = raw.split(/[\\/]/).pop().replace(/\.(?:jpg|jpeg|png|webp|mp4|mov|m4v|webm)$/i, '');
+      return normalize(basename) === target || exactMediaNamePattern.test(raw);
+    };
     const visible = (el) => {
       if (!el) return false;
       if (el.closest('#campaign_structure_tree_root, [data-surface*="editor_tree"], [data-non-int-surface*="editor_tree"]')) return false;
@@ -3929,11 +3943,13 @@ async function clickVisibleMediaImageOnce(page, targetAdName, options = {}) {
       const values = [];
       let node = el;
       for (let depth = 0; node && depth < 7; depth += 1) {
-        values.push(node.textContent);
+        const nodeBox = node.getBoundingClientRect?.();
+        const isLocalNode = !nodeBox || (nodeBox.width <= 520 && nodeBox.height <= 520);
+        if (isLocalNode) values.push(node.textContent);
         for (const attr of ['aria-label', 'title', 'alt', 'data-tooltip-content', 'cachekey']) {
           values.push(node.getAttribute?.(attr));
         }
-        for (const child of node.querySelectorAll?.('[aria-label], [title], [alt], [data-tooltip-content], img, span') || []) {
+        for (const child of isLocalNode ? (node.querySelectorAll?.('[aria-label], [title], [alt], [data-tooltip-content], img, span') || []) : []) {
           values.push(child.textContent);
           for (const attr of ['aria-label', 'title', 'alt', 'data-tooltip-content', 'cachekey']) {
             values.push(child.getAttribute?.(attr));
@@ -3948,8 +3964,7 @@ async function clickVisibleMediaImageOnce(page, targetAdName, options = {}) {
       const styleAttr = el.getAttribute('style') || '';
       const cachekey = el.getAttribute('cachekey') || '';
       const names = collectNames(el);
-      const normalizedNames = names.map(normalize);
-      const hasExact = normalizedNames.some((name) => name === target || name.includes(target));
+      const hasExact = names.some((name) => matchesExactMediaName(name));
       let score = 0;
       if (hasExact) score += 5000;
       if (cachekey.includes('ACCOUNT_1838892106940197:5fcb2558443858feef4df9bbdfe93c06')) score += 1000;
@@ -3982,8 +3997,7 @@ async function clickVisibleMediaImageOnce(page, targetAdName, options = {}) {
           parent = parent.parentElement;
         }
         const names = collectNames(el);
-        const normalizedNames = names.map(normalize);
-        const hasExact = normalizedNames.some((name) => name === target || name.includes(target));
+        const hasExact = names.some((name) => matchesExactMediaName(name));
         return {
           index,
           tagName: el.tagName,
@@ -4011,8 +4025,18 @@ async function clickVisibleMediaImageOnce(page, targetAdName, options = {}) {
   await page.waitForTimeout(7000);
 
   if (await isOneMediaSelected(page)) {
+    if (requireExact && !(await isExactMediaSelected(page, targetAdName))) {
+      console.log('[WARN] visible media click selected a non-exact media item - clearing selection:', { targetAdName });
+      await clearSelectedMediaSelections(page, targetAdName);
+      return false;
+    }
     console.log('[STEP] visible media selected by simple click:', { targetAdName });
     return true;
+  }
+
+  if (requireExact) {
+    console.log('[WARN] exact media click did not confirm selection - skipping coordinate fallbacks:', { targetAdName });
+    return false;
   }
 
   const coordinateCandidates = [
