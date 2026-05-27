@@ -4695,6 +4695,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       }
 
       if (
+        resumeOnly &&
         isAdsetStructureRow &&
         parsedAdsetIndex &&
         parsedAdsetIndex < adsetIndex &&
@@ -4713,6 +4714,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       }
 
       if (
+        resumeOnly &&
         isAdsetStructureRow &&
         parsedAdsetIndex &&
         parsedAdsetIndex > adsetIndex &&
