@@ -1134,14 +1134,10 @@ async function fillAdsetNameInAdsetModalOnly(page, adsetName) {
     throw new Error('광고 세트 이름 input을 3분 안에 찾지 못했습니다.');
   }
 
-  await targetInputHandle.asElement().click();
-  await page.waitForTimeout(150);
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-  await page.waitForTimeout(100);
-  await page.keyboard.press('Backspace');
-  await page.waitForTimeout(100);
-  await page.keyboard.type(adsetName, { delay: 80 });
-  let valueCheck = await waitForInputHandleValue(targetInputHandle, adsetName, 3000);
+  let valueCheck = await fastFillInputHandle(page, targetInputHandle, adsetName, 'initial adset name', {
+    timeoutMs: 2500,
+    typeDelay: 15,
+  });
   let actualValue = valueCheck.actual;
   console.log('[DEBUG] actual adset input value:', actualValue);
 
@@ -1314,6 +1310,86 @@ async function waitForInputHandleValue(inputHandle, expectedValue, timeoutMs = 3
     await new Promise((resolve) => setTimeout(resolve, 120));
   }
   return { ok: false, actual };
+}
+
+async function fastFillInputHandle(page, inputHandle, value, label = 'input', options = {}) {
+  const expected = String(value || '');
+  const verify = options.verify || 'includes';
+  const timeoutMs = Number(options.timeoutMs || 2500);
+  const element = typeof inputHandle?.asElement === 'function' ? inputHandle.asElement() : inputHandle;
+  const isMatch = (actual) => verify === 'exact'
+    ? String(actual || '') === expected
+    : normalizeText(actual || '').includes(normalizeText(expected));
+  const readActual = async () => element.evaluate((el) => el.value || '').catch(() => '');
+
+  await element.click({ force: true }).catch(async () => {
+    await element.scrollIntoViewIfNeeded().catch(() => null);
+    await element.click({ force: true });
+  });
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A').catch(() => null);
+  await page.keyboard.press('Backspace').catch(() => null);
+
+  const fillStartedAt = Date.now();
+  try {
+    if (typeof element.fill === 'function') {
+      await element.fill(expected, { timeout: 5000 });
+    } else {
+      await page.keyboard.insertText(expected);
+    }
+  } catch (error) {
+    console.log(`[WARN] ${label} fast fill failed - trying insertText:`, error.message);
+    await page.keyboard.insertText(expected).catch(() => null);
+  }
+
+  let actual = '';
+  const verifyStartedAt = Date.now();
+  while (Date.now() - verifyStartedAt < timeoutMs) {
+    actual = await readActual();
+    if (isMatch(actual)) {
+      console.log(`[DEBUG] ${label} fast fill ok:`, {
+        method: 'fill/insertText',
+        elapsedMs: Date.now() - fillStartedAt,
+      });
+      return { ok: true, actual, method: 'fill/insertText' };
+    }
+    await page.waitForTimeout(100);
+  }
+
+  console.log(`[DEBUG] ${label} fast fill mismatch - applying native value fallback:`, { expected, actual });
+  await element.evaluate((el, nextValue) => {
+    el.focus();
+    const prototype = Object.getPrototypeOf(el);
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+    if (descriptor?.set) {
+      descriptor.set.call(el, nextValue);
+    } else {
+      el.value = nextValue;
+    }
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: nextValue }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, expected).catch(async () => {
+    await element.evaluate((el, nextValue) => {
+      el.focus();
+      el.value = nextValue;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, expected);
+  });
+  await page.waitForTimeout(700);
+  actual = await readActual();
+  if (isMatch(actual)) {
+    console.log(`[DEBUG] ${label} native value fallback ok`);
+    return { ok: true, actual, method: 'native-value' };
+  }
+
+  console.log(`[WARN] ${label} native fallback mismatch - using keyboard.type fallback:`, { expected, actual });
+  await element.click({ force: true }).catch(() => null);
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A').catch(() => null);
+  await page.keyboard.press('Backspace').catch(() => null);
+  await page.keyboard.type(expected, { delay: Number(options.typeDelay || 10) });
+  await page.waitForTimeout(800);
+  actual = await readActual();
+  return { ok: isMatch(actual), actual, method: 'keyboard.type' };
 }
 
 async function fillCurrencyInputHandle(page, inputHandle, formattedValue, label) {
@@ -4306,26 +4382,16 @@ async function fillLandingUrlOnly(page, targetAdName, landingUrl = '') {
     const landingVisible = await landingInput.isVisible({ timeout: 5000 }).catch(() => false);
     if (landingVisible) {
       console.log('[STEP] landing URL input started:', { targetAdName, targetUrl });
-      await landingInput.click({ force: true });
-      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-      await page.keyboard.press('Backspace');
-      await page.keyboard.type(targetUrl, { delay: 40 });
-      await page.waitForTimeout(3000);
-      let actualUrl = await landingInput.inputValue().catch(() => '');
-      if (actualUrl !== targetUrl) {
-        await landingInput.evaluate((el, value) => {
-          el.focus();
-          el.value = value;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        }, targetUrl);
-        await page.waitForTimeout(1000);
-        actualUrl = await landingInput.inputValue().catch(() => '');
+      const landingInputHandle = await landingInput.elementHandle();
+      const filled = await fastFillInputHandle(page, landingInputHandle, targetUrl, 'landing URL', {
+        verify: 'exact',
+        timeoutMs: 2500,
+        typeDelay: 5,
+      });
+      if (!filled.ok) {
+        throw new Error(`Landing URL fill failed: expected=${targetUrl}, actual=${filled.actual}`);
       }
-      if (actualUrl !== targetUrl) {
-        throw new Error(`Landing URL fill failed: expected=${targetUrl}, actual=${actualUrl}`);
-      }
-      console.log('[STEP] landing URL input completed:', { targetAdName, targetUrl, actualUrl });
+      console.log('[STEP] landing URL input completed:', { targetAdName, targetUrl, actualUrl: filled.actual, method: filled.method });
       return;
     }
 
@@ -4389,26 +4455,16 @@ async function openCreativeSettingsAndFillLandingUrl(page, targetAdName, landing
   const landingVisible = await landingInput.isVisible({ timeout: 10000 }).catch(() => false);
   if (landingVisible) {
     console.log('[STEP] landing URL input started after creative settings:', { targetAdName, targetUrl });
-    await landingInput.click({ force: true });
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-    await page.keyboard.press('Backspace');
-    await page.keyboard.type(targetUrl, { delay: 40 });
-    await page.waitForTimeout(3000);
-    let actualUrl = await landingInput.inputValue().catch(() => '');
-    if (actualUrl !== targetUrl) {
-      await landingInput.evaluate((el, value) => {
-        el.focus();
-        el.value = value;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      }, targetUrl);
-      await page.waitForTimeout(1000);
-      actualUrl = await landingInput.inputValue().catch(() => '');
+    const landingInputHandle = await landingInput.elementHandle();
+    const filled = await fastFillInputHandle(page, landingInputHandle, targetUrl, 'landing URL after creative settings', {
+      verify: 'exact',
+      timeoutMs: 2500,
+      typeDelay: 5,
+    });
+    if (!filled.ok) {
+      throw new Error(`Landing URL fill failed after creative settings: expected=${targetUrl}, actual=${filled.actual}`);
     }
-    if (actualUrl !== targetUrl) {
-      throw new Error(`Landing URL fill failed after creative settings: expected=${targetUrl}, actual=${actualUrl}`);
-    }
-    console.log('[STEP] landing URL input completed after creative settings:', { targetAdName, targetUrl, actualUrl });
+    console.log('[STEP] landing URL input completed after creative settings:', { targetAdName, targetUrl, actualUrl: filled.actual, method: filled.method });
   } else {
     throw new Error('Landing URL input not found after creative settings.');
   }
@@ -4452,21 +4508,15 @@ async function fillAdNameAndVerify(page, adNameInput, targetAdName) {
   let actualAdName = '';
   for (let attempt = 1; attempt <= 4; attempt += 1) {
     await adNameInput.scrollIntoViewIfNeeded().catch(() => null);
-    await adNameInput.click({ force: true });
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-    await page.keyboard.press('Backspace');
-    if (attempt === 1) {
-      await page.keyboard.type(targetAdName, { delay: 70 });
-    } else {
-      await adNameInput.fill(targetAdName).catch(async () => {
-        await page.keyboard.type(targetAdName, { delay: 70 });
-      });
-    }
-    await page.waitForTimeout(attempt <= 2 ? 6000 : WAIT_CONFIG.extendedRetryIntervalMs);
-    actualAdName = await adNameInput.inputValue().catch(() => '');
-    console.log('[DEBUG] ad name input check:', { attempt, targetAdName, actualAdName });
-    if (actualAdName.includes(targetAdName)) {
-      console.log('[STEP] ad name changed:', { targetAdName, actualAdName, attempt });
+    const adNameInputHandle = await adNameInput.elementHandle();
+    const filled = await fastFillInputHandle(page, adNameInputHandle, targetAdName, 'ad name', {
+      timeoutMs: attempt <= 2 ? 2500 : WAIT_CONFIG.extendedRetryIntervalMs,
+      typeDelay: 10,
+    });
+    actualAdName = filled.actual;
+    console.log('[DEBUG] ad name input check:', { attempt, targetAdName, actualAdName, method: filled.method });
+    if (filled.ok) {
+      console.log('[STEP] ad name changed:', { targetAdName, actualAdName, attempt, method: filled.method });
       return actualAdName;
     }
 
@@ -4794,13 +4844,12 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
           ? await directAdsetInput.elementHandle()
           : await findVideoCboAdsetNameInputHandle(page, targetAdsetName);
         if (adsetInputHandle) {
-          await adsetInputHandle.click({ force: true });
-          await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-          await page.keyboard.press('Backspace');
-          await page.keyboard.type(targetAdsetName, { delay: 60 });
-          await page.waitForTimeout(3000);
-          let actualAdsetName = await adsetInputHandle.evaluate((el) => el.value || '').catch(() => '');
-          if (!actualAdsetName.includes(targetAdsetName)) {
+          let filled = await fastFillInputHandle(page, adsetInputHandle, targetAdsetName, 'sequential adset name', {
+            timeoutMs: 2500,
+            typeDelay: 10,
+          });
+          let actualAdsetName = filled.actual;
+          if (!filled.ok) {
             console.log('[DEBUG] adset rename keyboard fill mismatch - applying DOM fallback:', {
               targetAdsetName,
               actualAdsetName,
@@ -4814,7 +4863,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
             await page.waitForTimeout(1500);
             actualAdsetName = await adsetInputHandle.evaluate((el) => el.value || '').catch(() => '');
           }
-          console.log('[STEP] adset name changed:', { targetAdsetName, actualAdsetName });
+          console.log('[STEP] adset name changed:', { targetAdsetName, actualAdsetName, method: filled.method });
           if (!actualAdsetName.includes(targetAdsetName)) {
             throw new Error(`광고세트명 입력 확인 실패: expected=${targetAdsetName}, actual=${actualAdsetName}`);
           }
