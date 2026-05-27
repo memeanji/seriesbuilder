@@ -67,6 +67,7 @@ const WAIT_CONFIG = {
   extendedRetryIntervalMs: Number(process.env.WAIT_EXTENDED_RETRY_INTERVAL_MS || 7000),
   videoUploadTimeoutMs: Number(process.env.VIDEO_UPLOAD_TIMEOUT_MS || 180_000),
   videoFallbackWaitMs: Number(process.env.VIDEO_UPLOAD_FALLBACK_WAIT_MS || 90_000),
+  videoUploadMinWaitMs: Number(process.env.VIDEO_UPLOAD_MIN_WAIT_MS || 10_000),
   modeOverrides: {
     [CAMPAIGN_MODES.BLOG_MIXED]: Number(process.env.MODE_01_WAIT_MS || process.env.BLOG_MIXED_WAIT_MS || 10_000),
     [CAMPAIGN_MODES.BLOG_VIDEO]: Number(process.env.MODE_BLOG_VIDEO_WAIT_MS || process.env.BLOG_VIDEO_WAIT_MS || 12_000),
@@ -3370,6 +3371,9 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
   }
 
   console.log('[DEBUG] upload button box:', uploadBox);
+  if (explicitFiles?.length) {
+    await clearSelectedMediaSelections(page, targetAdName);
+  }
 
   const clickUploadButton = async () => uploadButton.click({ force: true }).catch(async () => {
     if (uploadBox) await page.mouse.click(uploadBox.x + uploadBox.width / 2, uploadBox.y + uploadBox.height / 2);
@@ -3422,15 +3426,18 @@ async function waitForVideoUploadComplete(page, targetAdName, timeoutMs = VIDEO_
   console.log('[STEP] video upload processing wait started:', {
     targetAdName,
     timeoutMs,
+    minWaitMs: WAIT_CONFIG.videoUploadMinWaitMs,
     fallbackWaitMs: WAIT_CONFIG.videoFallbackWaitMs,
   });
   let lastSnapshot = {};
 
   while (Date.now() - startedAt < timeoutMs) {
-    lastSnapshot = await page.evaluate(() => {
+    lastSnapshot = await page.evaluate((name) => {
       const bodyText = document.body?.innerText || '';
+      const escapedName = String(name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const hasError = /오류|실패|error|failed/i.test(bodyText);
       const hasProgress100 = /100\s*%/.test(bodyText);
+      const hasTargetName = escapedName ? new RegExp(escapedName, 'i').test(bodyText) : false;
       const hasThumbnail = [...document.querySelectorAll('img, video, canvas')]
         .some((el) => {
           const box = el.getBoundingClientRect();
@@ -3443,12 +3450,17 @@ async function waitForVideoUploadComplete(page, targetAdName, timeoutMs = VIDEO_
           return /^(다음|완료|저장|Next|Done|Save)$/.test(text) && !disabled;
         });
       const uploading = /업로드 중|처리 중|uploading|processing/i.test(bodyText);
-      return { hasError, hasProgress100, hasThumbnail, nextEnabled, uploading, textSample: bodyText.slice(0, 500) };
-    }).catch((error) => ({ error: error.message }));
+      return { hasError, hasProgress100, hasTargetName, hasThumbnail, nextEnabled, uploading, textSample: bodyText.slice(0, 500) };
+    }, targetAdName).catch((error) => ({ error: error.message }));
+
+    const elapsedMs = Date.now() - startedAt;
+    const uploadSignal = lastSnapshot.hasProgress100 || (lastSnapshot.hasThumbnail && lastSnapshot.nextEnabled && !lastSnapshot.uploading);
 
     console.log('[DEBUG] video upload wait status:', {
       targetAdName,
-      elapsedMs: Date.now() - startedAt,
+      elapsedMs,
+      minWaitSatisfied: elapsedMs >= WAIT_CONFIG.videoUploadMinWaitMs,
+      uploadSignal,
       ...lastSnapshot,
     });
 
@@ -3456,8 +3468,15 @@ async function waitForVideoUploadComplete(page, targetAdName, timeoutMs = VIDEO_
       await debugDump(page, `video upload error ${targetAdName}`);
       throw new Error(`Video upload failed for ${targetAdName}.`);
     }
-    if (lastSnapshot.hasProgress100 || (lastSnapshot.hasThumbnail && lastSnapshot.nextEnabled && !lastSnapshot.uploading)) {
-      console.log('[STEP] upload completed:', { targetAdName, uploadWaitDurationMs: Date.now() - startedAt });
+    if (uploadSignal && elapsedMs < WAIT_CONFIG.videoUploadMinWaitMs) {
+      console.log('[WAIT] video upload signal detected before minimum wait - keeping picker open:', {
+        targetAdName,
+        elapsedMs,
+        minWaitMs: WAIT_CONFIG.videoUploadMinWaitMs,
+      });
+    }
+    if (uploadSignal && elapsedMs >= WAIT_CONFIG.videoUploadMinWaitMs) {
+      console.log('[STEP] upload completed:', { targetAdName, uploadWaitDurationMs: elapsedMs });
       return true;
     }
     await page.waitForTimeout(3000);
@@ -3761,6 +3780,11 @@ async function isExactMediaSelected(page, targetAdName) {
         style.visibility !== 'hidden' &&
         style.display !== 'none';
     };
+    const isMediaPickerSelection = (el) => {
+      if (!el || el.closest('#campaign_structure_tree_root, [data-surface*="editor_tree"], [data-non-int-surface*="editor_tree"]')) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.left > 360 && rect.top > 80;
+    };
     const collectValues = (root) => {
       const values = [];
       let node = root;
@@ -3789,7 +3813,7 @@ async function isExactMediaSelected(page, targetAdName) {
     };
 
     const selected = [...document.querySelectorAll('[role="checkbox"][aria-checked="true"], input[type="checkbox"]:checked, [aria-selected="true"]')]
-      .filter(isVisible);
+      .filter((el) => isVisible(el) && isMediaPickerSelection(el));
     return selected.some((el) => collectValues(el).some((value) => value === normalizedTarget || value.includes(normalizedTarget)));
   }, targetAdName).catch(() => false);
 }
@@ -3802,6 +3826,12 @@ async function clearSelectedMediaSelections(page, targetAdName) {
     if (!visible) continue;
     const box = await element.boundingBox().catch(() => null);
     if (!box) continue;
+    const inMediaPicker = await element.evaluate((el) => {
+      if (el.closest('#campaign_structure_tree_root, [data-surface*="editor_tree"], [data-non-int-surface*="editor_tree"]')) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.left > 360 && rect.top > 80;
+    }).catch(() => false);
+    if (!inMediaPicker) continue;
     await element.click({ force: true }).catch(async () => {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     });
@@ -3817,6 +3847,7 @@ async function clickVisibleMediaImageOnce(page, targetAdName, options = {}) {
     const target = normalize(targetAdName);
     const visible = (el) => {
       if (!el) return false;
+      if (el.closest('#campaign_structure_tree_root, [data-surface*="editor_tree"], [data-non-int-surface*="editor_tree"]')) return false;
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
       return rect.width >= 40 &&
@@ -3824,7 +3855,7 @@ async function clickVisibleMediaImageOnce(page, targetAdName, options = {}) {
         style.visibility !== 'hidden' &&
         style.display !== 'none' &&
         rect.top > 80 &&
-        rect.left > 250;
+        rect.left > 360;
     };
 
     const collectNames = (el) => {
