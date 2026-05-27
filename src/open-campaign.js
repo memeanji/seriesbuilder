@@ -3168,6 +3168,22 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
   if (!files.length) {
     throw new Error(`No uploadable ${adFormat} files found in: ${uploadFolder}`);
   }
+  if (explicitFiles?.length) {
+    const targetStem = normalizeText(targetAdName);
+    const aliasStems = new Set([
+      targetStem,
+      targetStem.replace(/^f_v_o_l_/i, 'f_v_b_o_l_'),
+      targetStem.replace(/^f_v_b_o_l_/i, 'f_v_o_l_'),
+    ]);
+    const mismatched = files.filter((file) => {
+      const parsed = path.parse(file);
+      const stem = normalizeText(parsed.name);
+      return !aliasStems.has(stem);
+    });
+    if (mismatched.length) {
+      throw new Error(`Explicit ${adFormat} upload file does not match ad name: ${targetAdName}. Files: ${mismatched.join(', ')}`);
+    }
+  }
 
   console.log('[STEP] upload media folder selected:', {
     uploadFolder,
@@ -3280,8 +3296,11 @@ async function attachMediaFromFolderIfConfigured(page, targetAdName, explicitFil
 
   if (explicitFiles?.length) {
     if (!(await isOneMediaSelected(page))) {
-      console.log('[STEP] uploaded media is not selected yet - clicking visible media once:', { targetAdName, adFormat });
-      await clickVisibleMediaImageOnce(page, targetAdName);
+      console.log('[STEP] uploaded media is not selected yet - clicking exact visible media only:', { targetAdName, adFormat });
+      const exactSelected = await clickVisibleMediaImageOnce(page, targetAdName, { requireExact: true });
+      if (!exactSelected) {
+        throw new Error(`Uploaded ${adFormat} was not selected and exact visible media was not found: ${targetAdName}`);
+      }
     }
     await completeMediaPickerNextAndOriginalFlow(page, adFormat);
     return;
@@ -3621,9 +3640,12 @@ async function isOneMediaSelected(page) {
   return selectedLabel.isVisible({ timeout: 1000 }).catch(() => false);
 }
 
-async function clickVisibleMediaImageOnce(page, targetAdName) {
+async function clickVisibleMediaImageOnce(page, targetAdName, options = {}) {
   await page.waitForTimeout(5000);
-  const result = await page.evaluate(() => {
+  const requireExact = Boolean(options.requireExact);
+  const result = await page.evaluate(({ targetAdName, requireExact }) => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, '').toLowerCase();
+    const target = normalize(targetAdName);
     const visible = (el) => {
       if (!el) return false;
       const rect = el.getBoundingClientRect();
@@ -3636,10 +3658,33 @@ async function clickVisibleMediaImageOnce(page, targetAdName) {
         rect.left > 250;
     };
 
+    const collectNames = (el) => {
+      const values = [];
+      let node = el;
+      for (let depth = 0; node && depth < 7; depth += 1) {
+        values.push(node.textContent);
+        for (const attr of ['aria-label', 'title', 'alt', 'data-tooltip-content', 'cachekey']) {
+          values.push(node.getAttribute?.(attr));
+        }
+        for (const child of node.querySelectorAll?.('[aria-label], [title], [alt], [data-tooltip-content], img, span') || []) {
+          values.push(child.textContent);
+          for (const attr of ['aria-label', 'title', 'alt', 'data-tooltip-content', 'cachekey']) {
+            values.push(child.getAttribute?.(attr));
+          }
+        }
+        node = node.parentElement;
+      }
+      return [...new Set(values.filter(Boolean).map((value) => String(value).trim()).filter(Boolean))];
+    };
+
     const scoreTarget = (el) => {
       const styleAttr = el.getAttribute('style') || '';
       const cachekey = el.getAttribute('cachekey') || '';
+      const names = collectNames(el);
+      const normalizedNames = names.map(normalize);
+      const hasExact = normalizedNames.some((name) => name === target || name.includes(target));
       let score = 0;
+      if (hasExact) score += 5000;
       if (cachekey.includes('ACCOUNT_1838892106940197:5fcb2558443858feef4df9bbdfe93c06')) score += 1000;
       if (cachekey.startsWith('ACCOUNT_')) score += 500;
       if (styleAttr.includes('width: 96px') && styleAttr.includes('height: 96px')) score += 300;
@@ -3669,6 +3714,9 @@ async function clickVisibleMediaImageOnce(page, targetAdName) {
           }
           parent = parent.parentElement;
         }
+        const names = collectNames(el);
+        const normalizedNames = names.map(normalize);
+        const hasExact = normalizedNames.some((name) => name === target || name.includes(target));
         return {
           index,
           tagName: el.tagName,
@@ -3676,16 +3724,19 @@ async function clickVisibleMediaImageOnce(page, targetAdName) {
           cachekey: el.getAttribute('cachekey') || '',
           style: el.getAttribute('style') || '',
           score: scoreTarget(el),
+          hasExact,
+          names: names.slice(0, 20),
           box: { x: box.x, y: box.y, width: box.width, height: box.height },
           parentBoxes,
         };
-      });
+      })
+      .filter((item) => !requireExact || item.hasExact);
 
     targets.sort((a, b) => (b.score - a.score) || (b.box.x - a.box.x) || (a.box.y - b.box.y));
     return { found: targets.length > 0, target: targets[0] || null, count: targets.length };
-  }).catch((error) => ({ found: false, error: error.message }));
+  }, { targetAdName, requireExact }).catch((error) => ({ found: false, error: error.message }));
 
-  console.log('[DEBUG] visible media simple click candidate:', { targetAdName, result });
+  console.log('[DEBUG] visible media simple click candidate:', { targetAdName, requireExact, result });
   if (!result.found || !result.target) return false;
 
   const { box } = result.target;
@@ -5001,6 +5052,27 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       effectiveCreativeCount,
       totalRenameTarget,
     });
+
+    if (resumeOnly && adCreativeIndex > effectiveMaxCreativeTotal) {
+      console.log('[STEP] resume sequential ad rename completed after all target ads were processed:', {
+        adCreativeIndex,
+        effectiveMaxCreativeTotal,
+        adsetIndex,
+        adsetEndIndex,
+      });
+      return true;
+    }
+
+    if (!resumeOnly && adCreativeIndex > effectiveMaxCreativeTotal && adsetIndex >= adsetEndIndex) {
+      console.log('[STEP] sequential rename completed after all ads and final adset target were reached:', {
+        adCreativeIndex,
+        effectiveMaxCreativeTotal,
+        adsetIndex,
+        adsetEndIndex,
+        totalRenameTarget,
+      });
+      return true;
+    }
 
     if (adsetIndex > adsetEndIndex && adCreativeIndex > effectiveMaxCreativeTotal) {
       console.log('[STEP] sequential adset/ad rename completed');
