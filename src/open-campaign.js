@@ -4981,6 +4981,7 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
       const isVideoOnlyCboAdsetNameRow = isVideoOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
       const isImageOnlyCboAdsetNameRow = isImageOnlyCboCampaign() && isAdsetStructureRow && /\d{4}\s+CBO\s+광고\s*세트\s*-\s*\d+/i.test(adsetDisplayName);
       const shouldRenameAdsetRow = (isDefaultAdsetRow || isAdsetCopy || isBlogAdsetNameRow || isVideoOnlyAdsetNameRow || isVideoOnlyCboAdsetNameRow || isImageOnlyCboAdsetNameRow) && adsetIndex <= adsetEndIndex;
+      const shouldAlwaysVerifyAdsetName = isBlogCampaign() || isVideoOnlyCampaign() || isCboCampaign();
       const parsedAdsetIndex = isAdsetStructureRow
         ? parseAdsetIndexFromDisplayName(adsetDisplayName, effectiveCreativeCount)
         : null;
@@ -5049,7 +5050,13 @@ async function renameAdsetsAndAdsSequentially(page, adsetStartIndex = 1, adsetCo
         continue;
       }
 
-      if (isAlreadyTargetAdset && !isAdsetCopy && !isBlogAdsetCopyRow && adsetIndex <= adsetEndIndex) {
+      if (isAlreadyTargetAdset && shouldAlwaysVerifyAdsetName && adsetIndex <= adsetEndIndex) {
+        console.log('[DEBUG] adset name already matches target - verifying by reopening name input:', {
+          targetAdsetName,
+          rowKey,
+          displayName: adsetDisplayName.slice(0, 140),
+        });
+      } else if (isAlreadyTargetAdset && !isAdsetCopy && !isBlogAdsetCopyRow && adsetIndex <= adsetEndIndex) {
         processedAdsetRows.add(rowKey);
         console.log('[STEP] adset name already changed - moving to next adset:', { targetAdsetName, rowKey });
         adsetIndex += 1;
