@@ -60,6 +60,7 @@ const AUTO_RESUME_MAX_ATTEMPTS = Number.isFinite(Number(process.env.AUTO_RESUME_
 const AUTO_RESUME_WAIT_MS = Number.isFinite(Number(process.env.AUTO_RESUME_WAIT_MS))
   ? Number(process.env.AUTO_RESUME_WAIT_MS)
   : 10_000;
+const AUTO_RESUME_FROM_LATEST_LOG = String(process.env.AUTO_RESUME_FROM_LATEST_LOG || 'true').trim().toLowerCase() !== 'false';
 const WAIT_CONFIG = {
   baseRetryCount: Number(process.env.WAIT_BASE_RETRY_COUNT || 5),
   baseRetryIntervalMs: Number(process.env.WAIT_BASE_RETRY_INTERVAL_MS || 1500),
@@ -284,6 +285,72 @@ function activateRuntimeResumeFromContext(error, attempt) {
     resumeName,
     previousStep,
     error: error?.message || String(error),
+  });
+  return true;
+}
+
+async function activateRuntimeResumeFromLatestRunSummary(validation) {
+  if (!AUTO_RESUME_RECOVERABLE_ERRORS || !AUTO_RESUME_FROM_LATEST_LOG || DRY_RUN) return false;
+  if (INITIAL_RESUME_FROM_AD_NAME || (Number.isFinite(INITIAL_RESUME_FROM_AD_INDEX) && INITIAL_RESUME_FROM_AD_INDEX > 1)) return false;
+
+  const latestPath = path.resolve('logs', 'latest-run-summary.json');
+  const raw = await fs.readFile(latestPath, 'utf-8').catch(() => '');
+  if (!raw) return false;
+
+  let latest = null;
+  try {
+    latest = JSON.parse(raw);
+  } catch (error) {
+    console.warn('[AUTO-RESUME] latest run summary parse failed:', error.message);
+    return false;
+  }
+
+  const latestContext = latest?.context || {};
+  const latestStatus = String(latest?.status || '').toLowerCase();
+  const latestMode = normalizeCampaignMode(latestContext.campaign_mode || '');
+  const currentMode = normalizeCampaignMode(validation?.mode || CAMPAIGN_MODE);
+  const latestCampaignName = normalizeText(latestContext.campaign_name || '');
+  const currentCampaignName = normalizeText(activeCampaignPlan?.campaignName || CAMPAIGN_NAME || '');
+  const latestAdName = String(latestContext.current_ad_name || '').trim();
+  const latestAdIndex = Number(latestContext.current_ad_index || 0);
+  const latestStep = String(latestContext.current_step || '');
+
+  if (!latestStatus || latestStatus === 'success' || latestStatus === 'dry_run_success') return false;
+  if (!latestAdName || !Number.isFinite(latestAdIndex) || latestAdIndex < 1) return false;
+  if (latestMode !== currentMode || latestCampaignName !== currentCampaignName) return false;
+  if (/validate_config|campaign_create|duplicate_adsets|duplicate_ads|fill_adset_budget|schedule_adset|success/i.test(latestStep)) return false;
+
+  const plannedAds = (activeCampaignPlan?.adsets || []).flatMap((adset) => adset.ads || []);
+  const plannedAd = plannedAds.find((ad) => normalizeText(ad.name || '') === normalizeText(latestAdName)) ||
+    plannedAds.find((ad) => Number(ad.index || 0) === latestAdIndex);
+  if (!plannedAd) {
+    console.log('[AUTO-RESUME] latest failed ad is not in current plan - starting normally:', {
+      latestAdIndex,
+      latestAdName,
+      currentMode,
+      currentCampaignName: activeCampaignPlan?.campaignName || CAMPAIGN_NAME,
+    });
+    return false;
+  }
+
+  runtimeResumeFromAdIndex = Number(plannedAd.index || latestAdIndex);
+  runtimeResumeFromAdName = String(plannedAd.name || latestAdName).trim();
+  updateRunContext({
+    current_step: 'auto_resume_loaded_from_latest_log',
+    current_adset_index: plannedAd.adsetIndex || latestContext.current_adset_index || null,
+    current_adset_name: plannedAd.adsetName || latestContext.current_adset_name || '',
+    current_ad_index: runtimeResumeFromAdIndex,
+    current_ad_name: runtimeResumeFromAdName,
+    auto_resume_from_latest_log: true,
+    auto_resume_source_status: latestStatus,
+    auto_resume_source_step: latestStep,
+  });
+  console.log('[AUTO-RESUME] latest failed run matched current plan - starting from failed ad automatically:', {
+    resumeAdIndex: runtimeResumeFromAdIndex,
+    resumeAdName: runtimeResumeFromAdName,
+    sourceStatus: latestStatus,
+    sourceStep: latestStep,
+    latestPath,
   });
   return true;
 }
@@ -5630,6 +5697,7 @@ async function main() {
     if (validation.mode === CAMPAIGN_MODES.VIDEO_ONLY || validation.mode === CAMPAIGN_MODES.VIDEO_ONLY_CBO) {
       videoOnlyAssets = activeCampaignPlan.videoAssets || [];
     }
+    await activateRuntimeResumeFromLatestRunSummary(validation);
     console.log('[CONFIG] campaign mode:', validation.mode);
     if (imageOnlyPerAdAssets.length) {
       console.log('[CONFIG] image-only upload mode: PER_AD');
